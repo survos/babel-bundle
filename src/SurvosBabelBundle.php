@@ -234,7 +234,7 @@ final class SurvosBabelBundle extends AbstractBundle implements CompilerPassInte
 
         // Inject the precomputed index into the store
         if (!$index) {
-            throw new \RuntimeException('survos_babel: empty translatable index');
+//            throw new \RuntimeException('survos_babel: empty translatable index');
         }
         // Use findDefinition so aliases are resolved
         $def = $container->findDefinition(TranslationStore::class);

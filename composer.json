@@ -25,6 +25,8 @@
     }
   },
   "require-dev": {
-    "survos/libre-translate-bundle": "^1.6"
+    "survos/libre-translate-bundle": "^1.6",
+    "nikic/php-parser": "^5",
+    "nette/php-generator": "^4"
   }
 }
