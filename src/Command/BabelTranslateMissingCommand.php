@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
+use Survos\BabelBundle\Entity\Base\StrBase;
 use Survos\BabelBundle\Service\TranslationStore;
 use Survos\LibreTranslateBundle\Service\LibreTranslateService;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -42,7 +43,7 @@ final class BabelTranslateMissingCommand
         SymfonyStyle $io,
 
         #[Argument('Target locale (e.g. es)')]
-        string $targetLocale,
+        ?string $targetLocale=null,
 
         #[Option('Default source locale (fallback if Str.srcLocale is null)', shortcut: 'f')]
         ?string $from = null,
@@ -100,26 +101,36 @@ final class BabelTranslateMissingCommand
             $qb->setMaxResults($limit);
         }
 
-        $strRows = $qb->getQuery()->toIterable([], \Doctrine\ORM\AbstractQuery::HYDRATE_OBJECT);
+//        $strRows = $qb->getQuery()->toIterable([], \Doctrine\ORM\AbstractQuery::HYDRATE_OBJECT);
 
+        $io->section("Translating $trClass");
         $repoTr = $this->em->getRepository($trClass);
+        $trRows = $repoTr->createQueryBuilder('tr')->getQuery()->toIterable([], \Doctrine\ORM\AbstractQuery::HYDRATE_OBJECT);
+
 
         $total   = 0;
         $created = 0;
         $skipped = 0;
         $iFlush  = 0;
 
-        foreach ($strRows as $str) {
-            ++$total;
-
+        foreach ($trRows as $tr) {
+            /** @var StrBase $str */
+            $str = $this->em->getRepository($strClass)->find($tr->hash);
             $srcLocale = $str->srcLocale ?? $from ?? 'en';
 
-            // Skip if translation already exists
-            $existing = $repoTr->findOneBy(['hash' => $str->hash, 'locale' => $targetLocale]);
-            if ($existing) {
-                ++$skipped;
+            ++$total;
+
+            $targetLocale = $tr->locale;
+            if ($srcLocale === $targetLocale) {
                 continue;
             }
+
+//            // Skip if translation already exists
+//            $existing = $repoTr->findOneBy(['hash' => $str->hash, 'locale' => $targetLocale]);
+//            if ($existing) {
+//                ++$skipped;
+//                continue;
+//            }
 
             // Skip empties
             $valueToTranslate = trim((string)$str->original);
@@ -144,12 +155,13 @@ final class BabelTranslateMissingCommand
                 continue;
             }
 
+            $io->warning(sprintf('DRY: %s %s "%s" -> "%s"',
+                $str->hash, $srcLocale,
+                mb_strimwidth($valueToTranslate, 0, 40, '…'),
+                mb_strimwidth($translatedValue,   0, 40, '…')
+            ));
+
             if ($dryRun) {
-                $io->writeln(sprintf('DRY: %s %s "%s" -> "%s"',
-                    $str->hash, $srcLocale,
-                    mb_strimwidth($valueToTranslate, 0, 40, '…'),
-                    mb_strimwidth($translatedValue,   0, 40, '…')
-                ));
                 ++$created;
                 continue;
             }

@@ -5,9 +5,11 @@ namespace Survos\BabelBundle;
 
 use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\Translatable;
+use Survos\BabelBundle\Command\BabelBrowseCommand;
 use Survos\BabelBundle\Command\BabelPopulateCommand;
 use Survos\BabelBundle\Command\BabelTranslateMissingCommand;
 use Survos\BabelBundle\EventListener\TranslatableListener;
+use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslationStore;
 use Survos\LibreTranslateBundle\Service\LibreTranslateService;
 use Symfony\Component\Config\Definition\Configurator\DefinitionConfigurator;
@@ -47,6 +49,7 @@ final class SurvosBabelBundle extends AbstractBundle implements CompilerPassInte
         */
 
         foreach ([
+            BabelBrowseCommand::class,
                      BabelPopulateCommand::class,
                  ] as $commandClass) {
             $builder->autowire($commandClass)
@@ -59,10 +62,15 @@ final class SurvosBabelBundle extends AbstractBundle implements CompilerPassInte
             ->addTag('console.command');
 
         // Core store (uses the default EntityManager)
-        $builder->autowire(TranslationStore::class)
-            ->setAutowired(true)
-            ->setAutoconfigured(true)
-            ->setPublic(true);
+        foreach ([
+                     TranslationStore::class,
+                     LocaleContext::class
+                 ] as $publicClass) {
+            $builder->autowire($publicClass)
+                ->setAutowired(true)
+                ->setAutoconfigured(true)
+                ->setPublic(true);
+        }
 
         // Doctrine subscriber:
         // - prePersist/preUpdate: compute hashes, ensure Str & source StrTranslation

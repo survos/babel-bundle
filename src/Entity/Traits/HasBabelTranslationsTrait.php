@@ -3,29 +3,29 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Entity\Traits;
 
-use Doctrine\DBAL\Types\Types;
-use Doctrine\ORM\Mapping as ORM;
-
 /**
- * Optional helper: stores per-field translation keys so we can
- *  - detect source changes,
- *  - avoid recomputing hashes,
- *  - pass stable ids to other systems.
- *
- * Add "use HasBabelTranslationsTrait;" to your entity.
+ * Persist codes in $tCodes; keep resolved translations in $_resolved (NOT persisted).
  */
 trait HasBabelTranslationsTrait
 {
-    #[ORM\Column(type: Types::JSON, nullable: true)]
+    /** @var array<string,string>|null persisted: field => code/hash */
     public ?array $tCodes = null;
 
-    public function getTranslationCodes(): array
+    /** @var array<string,string> runtime only: field => translated text */
+    private array $_resolved = [];
+
+    public function getTranslatableCodeMap(): array
     {
-        return $this->tCodes ?? [];
+        return (array)($this->tCodes ?? []);
     }
 
-    public function setTranslationCodes(array $codes): void
+    public function setResolvedTranslation(string $field, string $text): void
     {
-        $this->tCodes = $codes ?: null;
+        $this->_resolved[$field] = $text;
+    }
+
+    public function getResolvedTranslation(string $field): ?string
+    {
+        return $this->_resolved[$field] ?? null;
     }
 }

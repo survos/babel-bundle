@@ -9,11 +9,10 @@ use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Event\PrePersistEventArgs;
 use Doctrine\ORM\Event\PreUpdateEventArgs;
-use Doctrine\ORM\Mapping\PropertyAccessors\PropertyAccessor;
 use ReflectionClass;
 use ReflectionProperty;
-use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\Translatable;
+use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslationStore;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\PropertyAccess\PropertyAccessorInterface;
@@ -29,7 +28,7 @@ final class TranslatableListener
 
     public function __construct(
         private readonly TranslationStore $store,
-        private readonly RequestStack $requestStack,
+        private LocaleContext $localeContext,
         private PropertyAccessorInterface $propertyAccessor,
         private readonly string $fallbackLocale = 'en',
     ) {}
@@ -121,30 +120,25 @@ final class TranslatableListener
 
     public function postLoad(PostLoadEventArgs $args): void
     {
+        // only entities with #[Translatable] attributes
         $entity = $args->getObject();
-
-        $currentLocale = $this->requestStack->getCurrentRequest()?->getLocale()
-            ?? $this->fallbackLocale;
-
-        $rc = new ReflectionClass($entity);
-
+        if (!$config = $this->store->translatableIndex[$entity::class]??null) {
+            return;
+        }
+        $currentLocale = $this->localeContext->get() ?? $this->fallbackLocale;
         /** @var array<string,string> $codes */
         $codes = property_exists($entity, 'tCodes') ? ((array)($entity->tCodes ?? [])) : [];
-
-        foreach ($rc->getProperties(ReflectionProperty::IS_PUBLIC) as $prop) {
-            $attrs = $prop->getAttributes(Translatable::class);
-            if (!$attrs) { continue; }
-
-            $value = $prop->getValue($entity);
+        foreach ($config['fields'] as $field=>$meta) {
+            $value = $this->propertyAccessor->getValue($entity, $field);
             if (!is_string($value) || $value === '') { continue; }
 
             /** @var Translatable $meta */
-            $meta = $attrs[0]->newInstance();
-            $hash = $codes[$prop->getName()] ?? $this->store->hash($value, $this->fallbackLocale, $meta->context);
+            $hash = $codes[$field] ?? $this->store->hash($value, $this->fallbackLocale, $meta['context']);
 
             $translated = $this->store->get($hash, $currentLocale) ?? $value;
-            $prop->setValue($entity, $translated);
+            $this->propertyAccessor->setValue($entity, $field, $translated);
         }
+
     }
 
     // --- HELPERS -------------------------------------------------------------
