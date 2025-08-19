@@ -30,10 +30,10 @@ final class BabelTranslateMissingCommand
         private readonly EntityManagerInterface $em,
         private readonly TranslationStore $store,
         // optional: wire your LibreTranslate service, but we resolve lazily to avoid hard coupling
-        private readonly ?LibreTranslateService $libreTranslateService = null,
+        private readonly LibreTranslateService $libreTranslateService,
     ) {
 
-        if ($libreTranslateService === null) {
+        if ($this->libreTranslateService === null) {
             throw new \Exception("composer req survos/libre-translate-bundle");
         }
     }
@@ -79,17 +79,6 @@ final class BabelTranslateMissingCommand
 
         // Resolve LibreTranslate service in a tolerant way (avoid hard dependency from BabelBundle)
         $lts = $this->libreTranslateService;
-        if (!$lts) {
-            // if Survos\LibreTranslateBundle is installed, try its default service id
-            // otherwise we fail loudly when we try to translate
-            try {
-                $serviceId = 'Survos\\LibreTranslateBundle\\Service\\LibreTranslateService';
-                if (\class_exists($serviceId)) {
-                    // Symfony DI will proxy this argument if configured; this is just a best-effort fallback.
-                    $lts = $this->libreTranslateService;
-                }
-            } catch (\Throwable) {}
-        }
 
         $io->title('Translate missing StrTranslation rows');
         $io->writeln(sprintf('target: <info>%s</info> engine: <comment>%s</comment> %s',
@@ -139,20 +128,14 @@ final class BabelTranslateMissingCommand
                 continue;
             }
 
-            // Translate (current quick path uses LibreTranslate)
-            if (!$lts || !\method_exists($lts, 'translateLine')) {
-                $io->error('LibreTranslate service not available. Install/configure Survos\\LibreTranslateBundle or inject your engine.');
-                return 1;
-            }
-
             try {
                 /** @var string $translatedValue */
-                $translatedValue = $lts->translateLine(
-                    $valueToTranslate,
-                    to: $targetLocale,
-                    from: $srcLocale,
-                    engine: $engine
-                );
+                $translatedValue = $lts->translate($valueToTranslate, $srcLocale, $targetLocale);
+//                    $valueToTranslate,
+//                    to: $targetLocale,
+//                    from: $srcLocale,
+//                    engine: $engine
+//                );
             } catch (\Throwable $e) {
                 $io->warning(sprintf('Failed [%s->%s] "%s": %s',
                     $srcLocale, $targetLocale, mb_strimwidth($valueToTranslate, 0, 60, '…'), $e->getMessage()

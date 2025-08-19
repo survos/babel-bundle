@@ -12,7 +12,10 @@
     "php": "^8.4",
     "doctrine/orm": "^3.5",
     "symfony/dependency-injection": "^7.3",
-    "symfony/http-kernel": "^7.3"
+    "symfony/http-kernel": "^7.3",
+    "doctrine/doctrine-bundle": "^2.15",
+    "symfony/property-access": "^7.3",
+    "ext-mbstring": "*"
   },
   "extra": {
     "branch-alias": {
