@@ -1,0 +1,14 @@
+{
+  "name": "survos/babel-bundle",
+  "description": "Lightweight translation base (Str/StrTranslation) + Translatable attribute & subscriber",
+  "type": "symfony-bundle",
+  "license": "MIT",
+  "autoload": { "psr-4": { "Survos\\BabelBundle\\": "src/" } },
+  "require": {
+    "php": "^8.2",
+    "doctrine/orm": "^2.16 || ^3.3",
+    "symfony/dependency-injection": "^7.3",
+    "symfony/http-kernel": "^7.3"
+  },
+  "extra": { "branch-alias": { "dev-main": "1.x-dev" } }
+}
