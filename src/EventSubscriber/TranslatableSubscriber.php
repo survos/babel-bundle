@@ -6,22 +6,27 @@ namespace Survos\BabelBundle\EventSubscriber;
 use Doctrine\Common\EventSubscriber;
 use Doctrine\ORM\Events;
 use Doctrine\ORM\Event\PostFlushEventArgs;
-use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Event\PrePersistEventArgs;
 use Doctrine\ORM\Event\PreUpdateEventArgs;
-use ReflectionClass;
-use ReflectionProperty;
-use Survos\BabelBundle\Attribute\BabelLocale;
-use Survos\BabelBundle\Attribute\Translatable;
-use Survos\BabelBundle\Contract\TranslatableResolvedInterface;
-use Survos\BabelBundle\I18n\ContextLocale;
+use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslationStore;
 
 /**
- * Subscriber that:
- *  - prePersist/preUpdate: ensures Str + source StrTranslation exist, updates tCodes (field=>hash)
- *  - postLoad: resolves translations into a NON-persisted cache on the entity (never overwrites mapped fields)
- *  - postFlush: performs a guarded second flush if we created new Str/StrTranslation during the first flush
+ * TranslatableSubscriber
+ *
+ * - Uses ONLY precomputed config from TranslationStore (no Reflection).
+ * - prePersist/preUpdate: compute hashes for #[Translatable] fields, ensure Str + source StrTranslation,
+ *   and maintain $entity->tCodes (field => hash) if present.
+ * - postFlush: single guarded second flush to persist Str/StrTranslation created during the first flush.
+ *
+ * Assumptions:
+ * - TranslationStore::getEntityConfig($entityOrClass) returns:
+ *     [
+ *       'fields'     => [ fieldName => ['context' => ?string], ... ],
+ *       'localeProp' => ?string,  // optional property name on the entity that holds the source locale
+ *       'hasTCodes'  => bool,
+ *     ]
+ * - Entities may have a nullable public array $tCodes; if present, we keep it updated.
  */
 final class TranslatableSubscriber implements EventSubscriber
 {
@@ -30,7 +35,7 @@ final class TranslatableSubscriber implements EventSubscriber
 
     public function __construct(
         private readonly TranslationStore $store,
-        private readonly ContextLocale $contextLocale,
+        private readonly LocaleContext $localeContext,
         private readonly string $fallbackLocale = 'en',
     ) {}
 
@@ -39,7 +44,6 @@ final class TranslatableSubscriber implements EventSubscriber
         return [
             Events::prePersist,
             Events::preUpdate,
-            Events::postLoad,
             Events::postFlush,
         ];
     }
@@ -56,7 +60,7 @@ final class TranslatableSubscriber implements EventSubscriber
         $entity = $args->getObject();
         $this->ensureSourceRecords($entity);
 
-        // Only needed if you modify mapped fields on the SAME entity
+        // If mapped fields on this entity were touched, recompute its changeset
         $uow  = $args->getObjectManager()->getUnitOfWork();
         $meta = $args->getObjectManager()->getClassMetadata($entity::class);
         $uow->recomputeSingleEntityChangeSet($meta, $entity);
@@ -67,7 +71,6 @@ final class TranslatableSubscriber implements EventSubscriber
         if (!$this->needsSecondFlush || $this->inSecondFlush) {
             return;
         }
-
         $this->inSecondFlush = true;
         $this->needsSecondFlush = false;
 
@@ -78,33 +81,31 @@ final class TranslatableSubscriber implements EventSubscriber
 
     private function ensureSourceRecords(object $entity): void
     {
-        $rc = new ReflectionClass($entity);
-        $srcLocale = $this->detectSourceLocale($entity) ?? $this->fallbackLocale;
-
-        $hasCodes = property_exists($entity, 'tCodes');
-        /** @var array<string,string> $codes */
-        $codes    = $hasCodes ? ((array)($entity->tCodes ?? [])) : [];
-        $updated  = false;
-
-        // Prefer precomputed index from TranslationStore to avoid reflection on every event
-        $config = $this->store->getEntityConfig($entity) ?? ['fields' => []];
-        $publicFields = array_keys($config['fields'] ?? []);
-
-        // Fallback to reflection if no index available
-        if (!$publicFields) {
-            $publicFields = array_map(fn(ReflectionProperty $p) => $p->getName(),
-                array_filter($rc->getProperties(ReflectionProperty::IS_PUBLIC), fn(ReflectionProperty $p) =>
-                    (bool)$p->getAttributes(Translatable::class))
-            );
+        $config = $this->store->getEntityConfig($entity) ?? [];
+        if (!$config) {
+            return; // not a translatable entity
         }
 
-        foreach ($publicFields as $field) {
-            $value = property_exists($entity, $field) ? $entity->$field : null;
-            if (!is_string($value) || trim($value) === '') {
+        // Determine source locale
+        $srcLocale = $this->readSourceLocale($entity, $config) ?? $this->fallbackLocale;
+
+        // Prepare $tCodes holder if present
+        $hasCodes = ($config['hasTCodes'] ?? false) && \property_exists($entity, 'tCodes');
+        /** @var array<string,string> $codes */
+        $codes   = $hasCodes ? ((array)($entity->tCodes ?? [])) : [];
+        $updated = false;
+
+        // Iterate only the precomputed translatable public fields
+        foreach (array_keys($config['fields'] ?? []) as $field) {
+            if (!\property_exists($entity, $field)) {
+                continue;
+            }
+            $value = $entity->{$field};
+            if (!\is_string($value) || \trim($value) === '') {
                 continue;
             }
 
-            $context = $config['fields'][$field]['context'] ?? $field; // default context = property name
+            $context = $config['fields'][$field]['context'] ?? $field; // default: property name
             $hash = $this->store->hash($value, $srcLocale, $context);
 
             if (($codes[$field] ?? null) !== $hash) {
@@ -112,7 +113,7 @@ final class TranslatableSubscriber implements EventSubscriber
                 $updated = true;
             }
 
-            // Upsert Str + source-locale StrTranslation
+            // Ensure Str + source-locale StrTranslation exist
             $this->store->upsert(
                 hash:      $hash,
                 original:  $value,
@@ -126,111 +127,41 @@ final class TranslatableSubscriber implements EventSubscriber
         }
 
         if ($hasCodes && $updated) {
+            // keep nullable to avoid noisy diffs when empty
             $entity->tCodes = $codes ?: null;
         }
     }
 
-    // ---------------- READ PHASE ----------------
-
-    public function postLoad(PostLoadEventArgs $args): void
+    /**
+     * Read source locale from precomputed config (preferred localeProp),
+     * otherwise fall back to common patterns, then null.
+     *
+     * @param array{localeProp?:?string} $config
+     */
+    private function readSourceLocale(object $entity, array $config): ?string
     {
-        $entity = $args->getObject();
-
-        // If no target locale set in ContextLocale, leave source text intact
-        $currentLocale = $this->contextLocale->get();
-        if ($currentLocale === null) {
-            return;
-        }
-
-        // Only store resolved translations in a non-persisted cache (never touch mapped fields)
-        if (!$entity instanceof TranslatableResolvedInterface) {
-            return;
-        }
-
-        $config = $this->store->getEntityConfig($entity) ?? [];
-        if (!$config) {
-            return;
-        }
-        $currentLocale = $config['locale'];
-        foreach ($config['fields'] ?? [] as $field) {
-
-        }
-
-        $rc = new ReflectionClass($entity);
-
-        /** @var array<string,string> $codes */
-        $codes = property_exists($entity, 'tCodes') ? ((array)($entity->tCodes ?? [])) : [];
-
-        $config = $this->store->getEntityConfig($entity) ?? ['fields' => []];
-        $publicFields = array_keys($config['fields'] ?? []);
-
-        if (!$publicFields) {
-            $publicFields = array_map(fn(ReflectionProperty $p) => $p->getName(),
-                array_filter($rc->getProperties(ReflectionProperty::IS_PUBLIC), fn(ReflectionProperty $p) =>
-                    (bool)$p->getAttributes(Translatable::class))
-            );
-        }
-
-        foreach ($publicFields as $field) {
-            if (!property_exists($entity, $field)) {
-                continue;
-            }
-            $sourceValue = $entity->$field;
-            if (!is_string($sourceValue) || $sourceValue === '') {
-                continue;
-            }
-
-            $context = $config['fields'][$field]['context'] ?? $field;
-            $hash = $codes[$field] ?? $this->store->hash($sourceValue, $this->fallbackLocale, $context);
-
-            $translated = $this->store->get($hash, $currentLocale) ?? $sourceValue;
-
-            // Write to NON-persisted resolved cache
-            $entity->setResolvedTranslation($field, $translated);
-        }
-    }
-
-    // ---------------- HELPERS ----------------
-
-    private function detectSourceLocale(object $entity): ?string
-    {
-        $rc = new ReflectionClass($entity);
-
-        foreach ($rc->getProperties() as $p) {
-            $attrs = $p->getAttributes(BabelLocale::class);
-            if (!$attrs) { continue; }
-            if (!$p->isPublic()) { $p->setAccessible(true); }
-            $v = $p->getValue($entity);
-            if (is_string($v) && $v !== '') {
-                return $this->normalizeLocale($v);
+        $prop = $config['localeProp'] ?? null;
+        if ($prop && \property_exists($entity, $prop)) {
+            $v = $entity->{$prop};
+            if (\is_string($v) && $v !== '') {
+                return $this->normalize($v);
             }
         }
 
-        if (property_exists($entity, 'locale')) {
+        // legacy fallback: public "locale"
+        if (\property_exists($entity, 'locale')) {
             $v = $entity->locale;
-            if (is_string($v) && $v !== '') {
-                return $this->normalizeLocale($v);
+            if (\is_string($v) && $v !== '') {
+                return $this->normalize($v);
             }
         }
 
-        if (method_exists($entity, 'getLocale')) {
-            $v = $entity->getLocale();
-            if (is_string($v) && $v !== '') {
-                return $this->normalizeLocale($v);
-            }
-        }
-
+        // as a last resort, use the bundle's default (null → caller will coalesce)
         return null;
     }
 
-    private function normalizeLocale(string $s): string
+    private function normalize(string $locale): string
     {
-        $s = str_replace('_', '-', $s);
-        if (preg_match('/^([a-zA-Z]{2,3})(?:-([A-Za-z]{2}))?$/', $s, $m)) {
-            $lang = strtolower($m[1]);
-            $reg  = isset($m[2]) ? '-'.strtoupper($m[2]) : '';
-            return $lang.$reg;
-        }
-        return $s;
+        return \str_replace('_', '-', \trim($locale));
     }
 }

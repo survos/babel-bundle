@@ -75,10 +75,14 @@ final class BabelBrowseCommand
                 $value = null;
                 if ($entity instanceof TranslatableResolvedInterface) {
                     $value = $entity->getResolvedTranslation($propName) ?? $entity->$propName;
+//                    $propName === 'description' && dd($propName, $value);
                 } else {
+//                    dd($entity::class . " is not TranslatableResolvedInterface ");
                     $value = $entity->$propName;
                 }
-                $value = mb_substr($value, 0, 40) . '...';
+                if ($value && ($format === 'text')) {
+                    $value = mb_substr($value, 0, 40) . '...';
+                }
                 $line[$propName] = $value;
             }
 

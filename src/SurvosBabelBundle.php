@@ -6,6 +6,7 @@ namespace Survos\BabelBundle;
 use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\Translatable;
 use Survos\BabelBundle\Command\BabelBrowseCommand;
+use Survos\BabelBundle\Command\BabelMakeTranslatableCommand;
 use Survos\BabelBundle\Command\BabelPopulateCommand;
 use Survos\BabelBundle\Command\BabelTranslateMissingCommand;
 use Survos\BabelBundle\EventListener\TranslatableListener;
@@ -49,7 +50,8 @@ final class SurvosBabelBundle extends AbstractBundle implements CompilerPassInte
         */
 
         foreach ([
-            BabelBrowseCommand::class,
+                     BabelMakeTranslatableCommand::class,
+                     BabelBrowseCommand::class,
                      BabelPopulateCommand::class,
                  ] as $commandClass) {
             $builder->autowire($commandClass)

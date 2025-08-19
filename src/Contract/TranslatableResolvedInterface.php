@@ -10,8 +10,8 @@ namespace Survos\BabelBundle\Contract;
  */
 interface TranslatableResolvedInterface
 {
-    /** @return array<string,string> field => code/hash */
-    public function getTranslatableCodeMap(): array;
+//    /** @return array<string,string> field => code/hash */
+//    public function getTranslatableCodeMap(): array;
 
     /** Store the resolved, non-persisted translation for a field */
     public function setResolvedTranslation(string $field, string $text): void;
