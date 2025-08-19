@@ -147,6 +147,15 @@ final class TranslatableSubscriber implements EventSubscriber
             return;
         }
 
+        $config = $this->store->getEntityConfig($entity) ?? [];
+        if (!$config) {
+            return;
+        }
+        $currentLocale = $config['locale'];
+        foreach ($config['fields'] ?? [] as $field) {
+
+        }
+
         $rc = new ReflectionClass($entity);
 
         /** @var array<string,string> $codes */
