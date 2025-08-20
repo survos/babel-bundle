@@ -1,5 +1,4 @@
 <?php
-// packages/pixie-bundle/src/Service/LocaleContext.php
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -16,62 +15,52 @@ final class LocaleContext
     private array $enabled;
 
     public function __construct(
-        private ?LocaleAwareInterface $translator = null,      // e.g. the "translator" service (optional)
-        private ?LocaleSwitcher $switcher = null,              // e.g. "locale.switcher" (optional)
-        ?ParameterBagInterface $params = null                  // to read kernel params without attributes
+        private ?LocaleAwareInterface $translator = null,
+        private ?LocaleSwitcher $switcher = null,
+        ?ParameterBagInterface $params = null
     ) {
-        $this->default = (string) ($params?->get('kernel.default_locale') ?? 'en');
+        $this->default = $this->normalize((string) ($params?->get('kernel.default_locale') ?? 'en'));
         $enabled = $params?->get('kernel.enabled_locales') ?? [];
-        $this->enabled = \is_array($enabled) ? $enabled : [];
+        $this->enabled = \is_array($enabled) ? array_values(array_map([$this, 'normalize'], $enabled)) : [];
 
         $this->current = $this->default;
         \Locale::setDefault($this->current);
-
-        // If available, keep framework services in sync
-        if ($this->switcher) {
-            $this->switcher->setLocale($this->current);
-        } elseif ($this->translator) {
-            $this->translator->setLocale($this->current);
-        }
+        $this->syncFramework($this->current);
     }
 
-    public function get(): string
-    {
-        return $this->current;
-    }
+    public function get(): string { return $this->current; }
+    public function getDefault(): string { return $this->default; }
+    /** @return string[] */
+    public function getEnabled(): array { return $this->enabled; }
 
-    public function set(string $locale): void
+    /** Set active locale; null => reset to default */
+    public function set(?string $locale = null): void
     {
-        $locale = $this->normalize($locale);
+        $locale = $locale === null ? $this->default : $this->normalize($locale);
         $this->assertSupported($locale);
-
         $this->current = $locale;
         \Locale::setDefault($locale);
-
-        if ($this->switcher) {
-            $this->switcher->setLocale($locale);
-        } elseif ($this->translator) {
-            $this->translator->setLocale($locale);
-        }
+        $this->syncFramework($locale);
     }
 
-    /**
-     * Temporarily run code under a specific locale and restore afterwards.
-     */
-    public function run(string $locale, callable $callback): mixed
+    /** Temporarily switch locale during callback, restore afterwards */
+    public function run(?string $locale, callable $callback): mixed
     {
         $prev = $this->get();
         $this->set($locale);
-        try {
-            return $callback();
-        } finally {
-            $this->set($prev);
-        }
+        try { return $callback(); }
+        finally { $this->set($prev); }
     }
 
     private function normalize(string $locale): string
     {
-        return str_replace('_', '-', trim($locale));
+        $locale = \str_replace('_', '-', \trim($locale));
+        if (\preg_match('/^([a-zA-Z]{2,3})(?:-([A-Za-z]{2}))?$/', $locale, $m)) {
+            $lang = \strtolower($m[1]);
+            $reg  = isset($m[2]) ? '-'.\strtoupper($m[2]) : '';
+            return $lang.$reg;
+        }
+        return $locale;
     }
 
     private function assertSupported(string $locale): void
@@ -82,6 +71,15 @@ final class LocaleContext
                 $locale,
                 implode(', ', $this->enabled)
             ));
+        }
+    }
+
+    private function syncFramework(string $locale): void
+    {
+        if ($this->switcher) {
+            $this->switcher->setLocale($locale);
+        } elseif ($this->translator) {
+            $this->translator->setLocale($locale);
         }
     }
 }

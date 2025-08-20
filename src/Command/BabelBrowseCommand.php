@@ -35,6 +35,8 @@ final class BabelBrowseCommand
             return 2;
         }
 
+
+
         $class = $this->resolveClass($entityName);
         if (!$class || !class_exists($class)) {
             $io->error(sprintf('Entity class not found: %s', $entityName));
@@ -51,6 +53,7 @@ final class BabelBrowseCommand
 
         // Set desired locale for postLoad (null=>keep source)
         $this->contextLocale->set($locale ? $this->normalizeLocale($locale) : null);
+        $io->note(sprintf('Browsing with locale: %s (default: %s)', $this->contextLocale->get(), $this->contextLocale->getDefault()));
 
         $repo = $this->em->getRepository($class);
         $qb = $repo->createQueryBuilder('e');

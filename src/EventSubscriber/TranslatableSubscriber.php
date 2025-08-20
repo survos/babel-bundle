@@ -4,33 +4,22 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\EventSubscriber;
 
 use Doctrine\Common\EventSubscriber;
-use Doctrine\ORM\Events;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Event\PrePersistEventArgs;
 use Doctrine\ORM\Event\PreUpdateEventArgs;
+use Doctrine\ORM\Events;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslationStore;
 
 /**
- * TranslatableSubscriber
- *
- * - Uses ONLY precomputed config from TranslationStore (no Reflection).
- * - prePersist/preUpdate: compute hashes for #[Translatable] fields, ensure Str + source StrTranslation,
- *   and maintain $entity->tCodes (field => hash) if present.
- * - postFlush: single guarded second flush to persist Str/StrTranslation created during the first flush.
- *
- * Assumptions:
- * - TranslationStore::getEntityConfig($entityOrClass) returns:
- *     [
- *       'fields'     => [ fieldName => ['context' => ?string], ... ],
- *       'localeProp' => ?string,  // optional property name on the entity that holds the source locale
- *       'hasTCodes'  => bool,
- *     ]
- * - Entities may have a nullable public array $tCodes; if present, we keep it updated.
+ * Attribute-driven subscriber:
+ *  - getEntityConfig() is precomputed by the bundle's compiler pass (attributes scan).
+ *  - prePersist/preUpdate: compute hashes for #[Translatable] fields, ensure Str & source StrTranslation
+ *    via DBAL upsert (identity-map safe), and maintain $entity->tCodes if present.
  */
 final class TranslatableSubscriber implements EventSubscriber
 {
-    private bool $needsSecondFlush = false;
+    private bool $needsSecondFlush = false; // kept if you have other entities to flush
     private bool $inSecondFlush = false;
 
     public function __construct(
@@ -41,11 +30,7 @@ final class TranslatableSubscriber implements EventSubscriber
 
     public function getSubscribedEvents(): array
     {
-        return [
-            Events::prePersist,
-            Events::preUpdate,
-            Events::postFlush,
-        ];
+        return [Events::prePersist, Events::preUpdate, Events::postFlush];
     }
 
     // ---------------- WRITE PHASE ----------------
@@ -73,9 +58,7 @@ final class TranslatableSubscriber implements EventSubscriber
         }
         $this->inSecondFlush = true;
         $this->needsSecondFlush = false;
-
         $args->getObjectManager()->flush();
-
         $this->inSecondFlush = false;
     }
 
@@ -95,39 +78,45 @@ final class TranslatableSubscriber implements EventSubscriber
         $codes   = $hasCodes ? ((array)($entity->tCodes ?? [])) : [];
         $updated = false;
 
-        // Iterate only the precomputed translatable public fields
+        // Iterate precomputed translatable public fields
         foreach (array_keys($config['fields'] ?? []) as $field) {
             if (!\property_exists($entity, $field)) {
                 continue;
             }
-            $value = $entity->{$field};
+
+            // Prefer backing value if using property hooks
+            $value = \method_exists($entity, 'getBackingValue')
+                ? $entity->getBackingValue($field)
+                : ($entity->{$field} ?? null);
+
             if (!\is_string($value) || \trim($value) === '') {
                 continue;
             }
 
-            $context = $config['fields'][$field]['context'] ?? $field; // default: property name
-            $hash = $this->store->hash($value, $srcLocale, $context);
+            $context = $config['fields'][$field]['context'] ?? $field;
+            $hash    = $this->store->hash($value, $srcLocale, $context);
 
             if (($codes[$field] ?? null) !== $hash) {
                 $codes[$field] = $hash;
                 $updated = true;
             }
 
-            // Ensure Str + source-locale StrTranslation exist
-            $this->store->upsert(
-                hash:      $hash,
-                original:  $value,
-                srcLocale: $srcLocale,
-                context:   $context,
-                locale:    $srcLocale,
-                text:      $value
+            // DBAL raw upsert (no ORM entity creation → no identity collisions)
+            $this->store->upsertRaw(
+                hash:          $hash,
+                original:      $value,
+                srcLocale:     $srcLocale,
+                context:       $context,
+                localeForText: $srcLocale,
+                text:          $value
             );
 
-            $this->needsSecondFlush = true;
+            // No need for a second flush for Str tables; DBAL wrote immediately
+            // Keep the flag in case your entity itself needs another flush round
+            $this->needsSecondFlush = $this->needsSecondFlush || false;
         }
 
         if ($hasCodes && $updated) {
-            // keep nullable to avoid noisy diffs when empty
             $entity->tCodes = $codes ?: null;
         }
     }
@@ -148,7 +137,6 @@ final class TranslatableSubscriber implements EventSubscriber
             }
         }
 
-        // legacy fallback: public "locale"
         if (\property_exists($entity, 'locale')) {
             $v = $entity->locale;
             if (\is_string($v) && $v !== '') {
@@ -156,7 +144,6 @@ final class TranslatableSubscriber implements EventSubscriber
             }
         }
 
-        // as a last resort, use the bundle's default (null → caller will coalesce)
         return null;
     }
 
