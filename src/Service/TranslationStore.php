@@ -11,6 +11,7 @@ final class TranslationStore
     public function __construct(
         private readonly EntityManagerInterface $em,
         public array $translatableIndex = [], // can be injected by compiler pass
+        public readonly array $enabledLocales = [], // inject from kernel.enabled_locales
     ) {}
 
     public function setTranslatableIndex(array $index): void { $this->translatableIndex = $index; }
@@ -134,6 +135,7 @@ final class TranslationStore
 
     public function get(string $hash, string $locale): ?string
     {
+        // some applications, like a pixie manager, have both!  We need to select by $em, in the constructor?
         $class = '\\App\\Entity\\StrTranslation';
         if (!class_exists($class)) {
             $class = '\\Survos\\PixieBundle\\Entity\\StrTranslation';
@@ -143,29 +145,52 @@ final class TranslationStore
         return $tr?->text;
     }
 
-    public function upsert(string $hash, string $original, string $srcLocale, ?string $context, string $locale, string $text): object
-    {
+    public function upsert(
+        string $hash,
+        string $original,
+        string $srcLocale,
+        ?string $context,
+        string $locale,
+        string $text
+    ): object {
         $strClass = '\\App\\Entity\\Str';
         $trClass  = '\\App\\Entity\\StrTranslation';
         if (!class_exists($strClass) || !class_exists($trClass)) {
-            $strClass = $strClass ?: '\\Survos\\PixieBundle\\Entity\\Str';
-            $trClass  = $trClass  ?: '\\Survos\\PixieBundle\\Entity\\StrTranslation';
+            $strClass = '\\Survos\\PixieBundle\\Entity\\Str';
+            $trClass  = '\\Survos\\PixieBundle\\Entity\\StrTranslation';
         }
 
+        // Ensure Str exists
         $strRepo = $this->em->getRepository($strClass);
         if (!$str = $strRepo->find($hash)) {
             $str = new $strClass($hash, $original, $srcLocale, $context);
+            $this->em->persist($str);
         }
         $str->updatedAt = new \DateTimeImmutable();
-        $this->em->persist($str);
 
+        // Always ensure source locale StrTranslation
         $trRepo = $this->em->getRepository($trClass);
-        if (!$tr = $trRepo->findOneBy(['hash' => $hash, 'locale' => $locale])) {
-            $tr = new $trClass($hash, $locale, $text);
+        if (!$tr = $trRepo->findOneBy(['hash' => $hash, 'locale' => $srcLocale])) {
+            $tr = new $trClass($hash, $srcLocale, $original);
             $this->em->persist($tr);
         }
-        $tr->text      = $text;
+        $tr->text      = $original;
         $tr->updatedAt = new \DateTimeImmutable();
+
+        // 👉 Ensure placeholder rows for all enabled locales
+        foreach ($this->enabledLocales as $loc) {
+            if ($loc === $srcLocale) {
+                continue; // skip source, already handled
+            }
+            if (!$trRepo->findOneBy(['hash' => $hash, 'locale' => $loc])) {
+                $un = new $trClass($hash, $loc, '');
+                if (property_exists($un, 'status')) {
+                    $un->status = 'untranslated';
+                }
+                $un->updatedAt = new \DateTimeImmutable();
+                $this->em->persist($un);
+            }
+        }
 
         return $tr;
     }
