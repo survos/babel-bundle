@@ -8,6 +8,11 @@
       "Survos\\BabelBundle\\": "src/"
     }
   },
+  "autoload-dev": {
+    "psr-4": {
+      "Survos\\BabelBundle\\Tests\\": "packages/babel-bundle/tests/"
+    }
+  },
   "require": {
     "php": "^8.4",
     "ext-intl": "*",
@@ -17,7 +22,9 @@
     "symfony/http-kernel": "^7.3",
     "doctrine/doctrine-bundle": "^2.15",
     "symfony/property-access": "^7.3",
-    "symfony/translation": "^7.3"
+    "symfony/translation": "^7.3",
+    "symfony/console": "^7.3",
+    "doctrine/persistence": "^4"
   },
   "extra": {
     "branch-alias": {
