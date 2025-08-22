@@ -117,12 +117,12 @@ class Post
 ## Commands
 
 | Command                          | What it does                                                                                                                  |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+|----------------------------------| ----------------------------------------------------------------------------------------------------------------------------- |
 | `code:translatable:trait [path]` | **Generate** `<Entity>TranslationsTrait` and update entities. Scans traits too; only converts fields **owned by the entity**. |
 | `babel:translatables:dump`       | Dump the **compiler‑pass index** of translatable classes/fields (great for debugging).                                        |
 | `babel:browse <Entity> <locale>` | Print translated fields for a given entity/locale (sanity check / reality check).                                             |
 | `babel:populate`                 | Example/scaffold command to populate/seed strings (if present in your app).                                                   |
-| `babel:translate:missing`        | Translate missing entries using LibreTranslate (if you’ve wired `survos/libre-translate-bundle`).                             |
+| `babel:translate`                | Translate missing entries using LibreTranslate (if you’ve wired `survos/libre-translate-bundle`).                             |
 
 > List all commands: `bin/console | grep -E '(babel|code:translatable)'`
 
@@ -193,7 +193,7 @@ Let’s translate a `Post` entity with `title` and `body`.
 4. Translate missing:
 
    ```bash
-   bin/console babel:translate:missing --from=en --to=es --limit=100
+   bin/console babel:translate --from=en --to=es --limit=100
    ```
 
    (Wire `survos/libre-translate-bundle` and the provided command will mark status and fill text.)

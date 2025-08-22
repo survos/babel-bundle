@@ -78,3 +78,39 @@ return static function (ContainerConfigurator $c): void {
         ->arg('$index', service(TranslatableIndex::class))
         ->tag('console.command');
 };
+<?php
+declare(strict_types=1);
+
+namespace Symfony\Component\DependencyInjection\Loader\Configurator;
+
+use Survos\BabelBundle\Cache\TranslatableMapWarmer;
+use Survos\BabelBundle\Service\Scanner\TranslatableScanner;
+use Survos\BabelBundle\Service\TranslatableMapProvider;
+
+return static function (ContainerConfigurator $c): void {
+    $s = $c->services();
+
+    // keep defaults: autowire+autoconfigure
+    $s->defaults()->autowire(true)->autoconfigure(true)->public(false);
+
+    // make sure we load everything except entities
+    $s->load('Survos\\BabelBundle\\', \dirname(__DIR__).'/src/')
+        ->exclude([\dirname(__DIR__).'/src/Entity/']);
+
+    // Scanner uses compiler-pass parameters
+    $s->set(TranslatableScanner::class)
+        ->arg('$doctrine', service('doctrine'))
+        ->arg('$scanEntityManagers', param('survos_babel.scan_entity_managers'))
+        ->arg('$allowedNamespaces', param('survos_babel.allowed_namespaces'))
+        ->public();
+
+    // Cache warmer (cache.app is PSR-6)
+    $s->set(TranslatableMapWarmer::class)
+        ->arg('$scanner', service(TranslatableScanner::class))
+        ->arg('$cachePool', service('cache.app'))
+        ->tag('kernel.cache_warmer');
+
+    // Provider
+    $s->set(TranslatableMapProvider::class)
+        ->arg('$cachePool', service('cache.app'));
+};
