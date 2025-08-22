@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Command;
 
 use Doctrine\Persistence\ManagerRegistry;
+use Survos\BabelBundle\Service\Engine\EngineResolver;
 use Survos\BabelBundle\Service\StringStorageRouter;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -17,6 +18,7 @@ final class PopulateMissingCommand
     public function __construct(
         private readonly ManagerRegistry $registry,
         private readonly StringStorageRouter $router,
+        private EngineResolver $engineResolver,
     ) {}
 
     public function __invoke(
@@ -36,6 +38,13 @@ final class PopulateMissingCommand
             // ObjectRepository::findAll always exists
             $iterable = $repo->findAll();
         }
+
+        // @todo: ue this
+        $iterable = $this->engineResolver->iterateMissing($class, $locale, $source, $limit);
+        $io->title(sprintf('Missing translations%s for [%s] via compiled router',
+            $entityFqcn ? " in $entityFqcn" : '',
+            $locale
+        ));
 
         $count = 0;
         foreach ($iterable as $carrier) {

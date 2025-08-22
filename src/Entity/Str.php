@@ -7,7 +7,8 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Repository\StrRepository;
 
-#[ORM\Entity(repositoryClass: StrRepository::class)]
+#[ORM\MappedSuperclass]
+//#[ORM\Entity(repositoryClass: StrRepository::class)]
 #[ORM\Index(name: 'idx_str_original_hash', columns: ['original_hash'])]
 class Str implements \Stringable
 {

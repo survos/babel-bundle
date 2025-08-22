@@ -4,18 +4,24 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Contract;
 
 /**
- * Entities implementing this interface agree to:
- *  - expose a persisted map (tCodes) field=>hash (or provide equivalent)
- *  - accept resolved translations into a NON-persisted cache
+ * Entities that expose resolved translations at runtime.
+ * Keep this interface focused on RUNTIME access only.
  */
 interface TranslatableResolvedInterface
 {
-//    /** @return array<string,string> field => code/hash */
-//    public function getTranslatableCodeMap(): array;
-
-    /** Store the resolved, non-persisted translation for a field */
+    /**
+     * Store resolved translation for a given field (non-persisted cache).
+     */
     public function setResolvedTranslation(string $field, string $text): void;
 
-    /** Read the resolved translation, if any */
+    /**
+     * Get resolved translation for a given field if available.
+     */
     public function getResolvedTranslation(string $field): ?string;
+
+    /**
+     * Get raw backing field value (original source text), e.g. "titleBacking".
+     * Listeners call this instead of touching private properties.
+     */
+    public function getBackingValue(string $field): mixed;
 }

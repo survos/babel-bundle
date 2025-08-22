@@ -7,7 +7,8 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Repository\StrTranslationRepository;
 
-#[ORM\Entity(repositoryClass: StrTranslationRepository::class)]
+#[ORM\MappedSuperclass]
+//#[ORM\Entity(repositoryClass: StrTranslationRepository::class)]
 #[ORM\UniqueConstraint(name: 'uniq_str_tr_code_locale', columns: ['code', 'locale'])]
 class StrTranslation
 {
