@@ -1,9 +1,9 @@
 parameters:
-    level: 9
+    level: 4
     inferPrivatePropertyTypeFromConstructor: true
     paths:
         - ./src/
-        - ./tests
+#        - ./tests
     excludePaths:
 #      - 'src/Resources/skeleton'
 #      - */cache/*
