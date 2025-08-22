@@ -10,7 +10,7 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "Survos\\BabelBundle\\Tests\\": "packages/babel-bundle/tests/"
+      "Survos\\BabelBundle\\Tests\\": "tests/"
     }
   },
   "require": {

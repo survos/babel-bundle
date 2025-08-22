@@ -9,7 +9,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand('babel:scan:translatables', 'Scan entities for translatable fields (property storage) and show the map.')]
+#[AsCommand('babel:scan', 'Scan entities for #[Translatable] fields (property storage) and show the map.')]
 final class BabelScanCommand
 {
     public function __construct(
