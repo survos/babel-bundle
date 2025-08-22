@@ -8,5 +8,5 @@ enum StorageMode: string { case Code = 'code'; case Property = 'property'; }
 #[\Attribute(\Attribute::TARGET_CLASS)]
 final class BabelStorage
 {
-    public function __construct(public StorageMode $mode) {}
+        public function __construct(public StorageMode $mode) {}
 }

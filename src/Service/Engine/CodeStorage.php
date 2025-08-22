@@ -15,7 +15,7 @@ final class CodeStorage implements StringStorage
 {
     public function __construct(
         private ManagerRegistry $registry,
-        private TranslationClientService $translator,
+        private ?TranslationClientService $translator=null,
     ) {}
 
     public function populate(object $carrier, ?string $emName = null): int
