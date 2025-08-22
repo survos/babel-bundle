@@ -3,15 +3,15 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service\Engine;
 
-use Survos\LibreTranslateBundle\Service\TranslationClientService;
+use Survos\BabelBundle\Contract\TranslatorInterface;
 
 final class PropertyStorage implements StringStorage
 {
-    public function __construct(private TranslationClientService $translator) {}
+    public function __construct(private TranslatorInterface $translator) {}
 
     public function populate(object $carrier, ?string $emName = null): int
     {
-        // no-op for property mode — originals live on the entity
+        // property-backed: originals already on the entity
         return 0;
     }
 
@@ -23,13 +23,14 @@ final class PropertyStorage implements StringStorage
 
         $fields = $carrier->getTranslatableFields();
         $src    = $carrier->getSourceLocale() ?? 'en';
-        $n=0;
+        $n = 0;
 
         foreach ($fields as $f) {
             $cur = $carrier->getText($f, $locale);
             if ($onlyMissing && \is_string($cur) && $cur !== '') continue;
             $source = $carrier->getText($f, $src);
             if (!\is_string($source) || $source === '') continue;
+
             $carrier->setText($f, $locale, $this->translator->translate($source, $src, $locale));
             $n++;
         }

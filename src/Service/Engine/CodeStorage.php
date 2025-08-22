@@ -6,16 +6,16 @@ namespace Survos\BabelBundle\Service\Engine;
 use Doctrine\Persistence\ManagerRegistry;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
+use Survos\BabelBundle\Contract\TranslatorInterface;
 use Survos\BabelBundle\Entity\Str;
 use Survos\BabelBundle\Repository\StrRepository;
 use Survos\BabelBundle\Repository\StrTranslationRepository;
-use Survos\LibreTranslateBundle\Service\TranslationClientService;
 
 final class CodeStorage implements StringStorage
 {
     public function __construct(
         private ManagerRegistry $registry,
-        private ?TranslationClientService $translator=null,
+        private TranslatorInterface $translator,
     ) {}
 
     public function populate(object $carrier, ?string $emName = null): int
@@ -24,7 +24,7 @@ final class CodeStorage implements StringStorage
         if ($attr && $attr->newInstance()->mode !== StorageMode::Code) return 0;
         if (!\method_exists($carrier, 'getStringCodeMap') || !\method_exists($carrier, 'getOriginalFor')) return 0;
 
-        $map = $carrier->getStringCodeMap();
+        $map = $carrier->getStringCodeMap();   // field => code
         $src = $carrier->getSourceLocale() ?? 'en';
 
         $items = [];
@@ -33,22 +33,24 @@ final class CodeStorage implements StringStorage
             if (!\is_string($original) || $original === '') continue;
             $items[] = [$code, $original, $src];
         }
+        if (!$items) return 0;
 
         $em = $this->registry->getManager($emName);
         /** @var StrRepository $repo */
         $repo = $em->getRepository(Str::class);
+
         return $repo->upsertMany($items);
     }
 
     public function translate(object $carrier, string $locale, bool $onlyMissing = true, ?string $emName = null): int
     {
+        if (!\method_exists($carrier, 'getStringCodeMap')) return 0;
+
         $em    = $this->registry->getManager($emName);
         /** @var StrRepository $sRepo */
         $sRepo = $em->getRepository(Str::class);
         /** @var StrTranslationRepository $tRepo */
         $tRepo = $em->getRepository(\Survos\BabelBundle\Entity\StrTranslation::class);
-
-        if (!\method_exists($carrier, 'getStringCodeMap')) return 0;
 
         $n = 0;
         foreach ($carrier->getStringCodeMap() as $field => $code) {
