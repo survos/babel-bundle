@@ -3,61 +3,40 @@ declare(strict_types=1);
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
-use Doctrine\Persistence\ManagerRegistry;
-use Survos\BabelBundle\Command\PopulateMissingCommand;
-use Survos\BabelBundle\Command\TranslateCommand;
 use Survos\BabelBundle\Service\CarrierRegistry;
 use Survos\BabelBundle\Service\Engine\CodeStorage;
 use Survos\BabelBundle\Service\Engine\PropertyStorage;
-use Survos\BabelBundle\Service\Engine\StringStorage;
-use Survos\BabelBundle\Service\StringCodeGenerator;
-use Survos\BabelBundle\Service\StringResolver;
 use Survos\BabelBundle\Service\StringStorageRouter;
-use Survos\LibreTranslateBundle\Service\TranslationClientService;
 
 return static function (ContainerConfigurator $c): void {
     $s = $c->services();
 
-    // Core services (explicit, public for easy reuse in other bundles/commands)
-    $s->set(StringCodeGenerator::class)->public();
+    // Defaults: keep it easy
+    $s->defaults()
+        ->autowire(true)
+        ->autoconfigure(true)   // <-- this lets Doctrine auto-tag ServiceEntityRepository, and AsCommand auto-register
+        ->public(false);
 
-    $s->set(StringResolver::class)
-        ->arg('$registry', service('doctrine'))
-        ->public();
+    // Load almost everything in src/, but skip entities so they don't become services
+    $s->load('Survos\\BabelBundle\\', \dirname(__DIR__).'/src/')
+        ->exclude([
+            \dirname(__DIR__).'/src/Entity/',
+        ]);
 
-    // Engines
-    $s->set(CodeStorage::class)
-        ->arg('$registry', service('doctrine'))
-        ->arg('$translator', service(TranslationClientService::class))
-        ->public();
+    // A few services need explicit args/bindings:
 
-    $s->set(PropertyStorage::class)
-        ->arg('$translator', service(TranslationClientService::class))
-        ->public();
-
-    // Router
+    // Router depends on our two engines explicitly (autowire would work too, but be explicit)
     $s->set(StringStorageRouter::class)
         ->arg('$codeEngine', service(CodeStorage::class))
         ->arg('$propertyEngine', service(PropertyStorage::class))
         ->public();
 
-    // Runtime carrier discovery (uses compiler-pass parameters)
+    // CarrierRegistry needs parameters from the compiler pass
     $s->set(CarrierRegistry::class)
         ->arg('$doctrine', service('doctrine'))
         ->arg('$scanEntityManagers', param('survos_babel.scan_entity_managers'))
         ->arg('$allowedNamespaces', param('survos_babel.allowed_namespaces'))
         ->public();
 
-    // Console commands
-    $s->set(PopulateMissingCommand::class)
-        ->arg('$registry', service('doctrine'))
-        ->arg('$router', service(StringStorageRouter::class))
-        ->tag('console.command')
-        ->public();
-
-    $s->set(TranslateCommand::class)
-        ->arg('$registry', service('doctrine'))
-        ->arg('$router', service(StringStorageRouter::class))
-        ->tag('console.command')
-        ->public();
+    // (Nothing else strictly needs to be public; commands are discovered via #[AsCommand])
 };
