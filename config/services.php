@@ -5,6 +5,7 @@ namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use Survos\BabelBundle\Cache\TranslatableMapWarmer;
 use Survos\BabelBundle\Command\BabelBrowseCommand;
+use Survos\BabelBundle\Command\BabelTranslatableDumpCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Command\PopulateMissingCommand;
 use Survos\BabelBundle\Command\TranslatableIndexCommand;
@@ -63,12 +64,12 @@ return static function (ContainerConfigurator $c): void {
         ->public();
 
     $s->set(TranslatableIndex::class)
-        ->arg('$index', param('survos_babel.translatable_index'))
+        ->arg('$map', param('survos_babel.translatable_index'))
         ->public();
 
     // Commands
 
-    foreach ([BabelBrowseCommand::class] as $commandClass) {
+    foreach ([BabelBrowseCommand::class, BabelTranslatableDumpCommand::class] as $commandClass) {
         $s->set($commandClass)
             ->public()
             ->autoconfigure(true)
@@ -76,13 +77,15 @@ return static function (ContainerConfigurator $c): void {
 
     }
     $s->set(PopulateMissingCommand::class)
-        ->arg('$registry', service('doctrine'))
-        ->arg('$router', service(StringStorageRouter::class))
+        ->autoconfigure()
+//        ->arg('$registry', service('doctrine'))
+//        ->arg('$router', service(StringStorageRouter::class))
         ->tag('console.command');
 
     $s->set(TranslateCommand::class)
-        ->arg('$registry', service('doctrine'))
-        ->arg('$router', service(StringStorageRouter::class))
+        ->autoconfigure()
+//        ->arg('$registry', service('doctrine'))
+//        ->arg('$router', service(StringStorageRouter::class))
         ->tag('console.command');
 
     $s->set(CarriersListCommand::class)

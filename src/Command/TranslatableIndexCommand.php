@@ -8,7 +8,7 @@ use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand('babel:translatable:index', 'Show the compile-time translatable index built by the compiler pass.')]
+#[AsCommand('babel:debug', 'Show the compile-time translatable index built by the compiler pass.')]
 final class TranslatableIndexCommand
 {
     public function __construct(private readonly TranslatableIndex $index) {}

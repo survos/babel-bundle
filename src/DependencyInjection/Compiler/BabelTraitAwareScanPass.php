@@ -6,6 +6,7 @@ namespace Survos\BabelBundle\DependencyInjection\Compiler;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
+use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 
@@ -51,6 +52,13 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
         \ksort($index);
         $container->setParameter('survos_babel.translatable_index', $index);
+
+// Prefer constructor injection:
+        if ($container->hasDefinition(\Survos\BabelBundle\Service\TranslatableIndex::class)) {
+            $def = $container->getDefinition(\Survos\BabelBundle\Service\TranslatableIndex::class);
+            $def->setArgument('$map', $index);
+        }
+
     }
 
     /** @return iterable<string> */
