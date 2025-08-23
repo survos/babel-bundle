@@ -7,7 +7,6 @@ use Doctrine\Persistence\ManagerRegistry;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Contract\TranslatorInterface;
-use Survos\BabelBundle\Entity\Str;
 use Survos\BabelBundle\Repository\StrRepository;
 use Survos\BabelBundle\Repository\StrTranslationRepository;
 

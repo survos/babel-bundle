@@ -13,12 +13,15 @@ use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Doctrine\ORM\UnitOfWork;
 use Psr\Log\LoggerInterface;
-use ReflectionClass;
-use Survos\BabelBundle\Attribute\Translatable;
-use Survos\BabelBundle\Entity\Str;
-use Survos\BabelBundle\Entity\StrTranslation;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Survos\BabelBundle\Service\LocaleContext;
+use Survos\BabelBundle\Service\TranslatableIndex;
+use Survos\BabelBundle\Util\BabelHasher;
 
+/**
+ * String-backed write-side: NO runtime attribute parsing.
+ * Uses TranslatableIndex for fields, LocaleContext for source locale,
+ * and BabelHasher for a consistent key.
+ */
 #[AsDoctrineListener(event: Events::onFlush)]
 #[AsDoctrineListener(event: Events::postFlush)]
 final class StringBackedTranslatableFlushSubscriber
@@ -31,240 +34,134 @@ final class StringBackedTranslatableFlushSubscriber
 
     public function __construct(
         private readonly LoggerInterface $logger,
-        #[Autowire(param: 'kernel.default_locale')] private readonly string $defaultLocale = 'en',
-        /** @var string[] */
-        #[Autowire(param: 'kernel.enabled_locales')] private readonly array $enabledLocales = [],
+        private readonly LocaleContext $locale,
+        private readonly TranslatableIndex $index,
     ) {}
 
     public function onFlush(OnFlushEventArgs $args): void
     {
-        $em  = $args->getObjectManager();
-        $uow = $em->getUnitOfWork();
-
         $this->pending = [];
         $this->pendingWithText = [];
+        $this->collect($args->getObjectManager()->getUnitOfWork());
 
-        $this->collectTranslatables($uow);
-
-        $this->logger->info('Babel onFlush collected translatables', [
-            'count_pending' => \count($this->pending),
-            'count_texts'   => \count($this->pendingWithText),
+        $this->logger->info('Babel onFlush collected', [
+            'pending' => \count($this->pending),
+            'texts'   => \count($this->pendingWithText),
         ]);
     }
 
     public function postFlush(PostFlushEventArgs $args): void
     {
         if ($this->pending === [] && $this->pendingWithText === []) {
-            $this->logger->debug('Babel postFlush: nothing pending; skipping.');
             return;
         }
 
         $em       = $args->getObjectManager();
         $conn     = $em->getConnection();
         $platform = $conn->getDatabasePlatform();
+        $nowExpr  = $platform instanceof SqlitePlatform ? 'CURRENT_TIMESTAMP' : 'NOW()';
 
-        // Resolve metadata (real table/column names & nullability)
-        $strMeta = $em->getClassMetadata(Str::class);
-        $trMeta  = $em->getClassMetadata(StrTranslation::class);
+        $strTable = 'str';
+        $trTable  = 'str_translation';
 
-        $strTable = $strMeta->getTableName();
-        $trTable  = $trMeta->getTableName();
-
-        $col = static function($meta, string $field): ?string {
-            return $meta->hasField($field) ? $meta->getColumnName($field) : null;
-        };
-        $nullable = static function($meta, string $field): bool {
-            if (!$meta->hasField($field)) return true;
-            $m = $meta->getFieldMapping($field);
-            return $m['nullable'] ?? true;
-        };
-
-        // Canonical columns (always exist)
-        $strHashCol = $col($strMeta, 'hash') ?? 'hash';
-        $strOrigCol = $col($strMeta, 'original') ?? 'original';
-        $strSrcCol  = $col($strMeta, 'srcLocale') ?? 'src_locale';
-
-        $trHashCol = $col($trMeta, 'hash') ?? 'hash';
-        $trLocCol  = $col($trMeta, 'locale') ?? 'locale';
-        $trTextCol = $col($trMeta, 'text') ?? 'text';
-
-        // Optional timestamp/status columns (add if present)
-        $strCreatedCol = $col($strMeta, 'createdAt');
-        $strUpdatedCol = $col($strMeta, 'updatedAt');
-
-        $trCreatedCol = $col($trMeta, 'createdAt');
-        $trUpdatedCol = $col($trMeta, 'updatedAt');
-        $trStatusCol  = $col($trMeta, 'status');
-
-        // NOT NULL detection to help logs
-        $strCreatedNN = $strCreatedCol ? !$nullable($strMeta, 'createdAt') : false;
-        $strUpdatedNN = $strUpdatedCol ? !$nullable($strMeta, 'updatedAt') : false;
-        $trCreatedNN  = $trCreatedCol ? !$nullable($trMeta, 'createdAt') : false;
-        $trUpdatedNN  = $trUpdatedCol ? !$nullable($trMeta, 'updatedAt') : false;
-
-        $this->logger->info('Babel postFlush starting', [
-            'platform'        => $platform::class,
-            'str_table'       => $strTable,
-            'tr_table'        => $trTable,
-            'pending_count'   => \count($this->pending),
-            'pending_texts'   => \count($this->pendingWithText),
-            'enabled_locales' => $this->enabledLocales,
-            'default_locale'  => $this->defaultLocale,
-            'columns' => [
-                'str' => [
-                    'hash'      => $strHashCol,
-                    'original'  => $strOrigCol,
-                    'src'       => $strSrcCol,
-                    'createdAt' => $strCreatedCol,
-                    'updatedAt' => $strUpdatedCol,
-                    'createdNN' => $strCreatedNN,
-                    'updatedNN' => $strUpdatedNN,
-                ],
-                'tr' => [
-                    'hash'      => $trHashCol,
-                    'locale'    => $trLocCol,
-                    'text'      => $trTextCol,
-                    'createdAt' => $trCreatedCol,
-                    'updatedAt' => $trUpdatedCol,
-                    'status'    => $trStatusCol,
-                    'createdNN' => $trCreatedNN,
-                    'updatedNN' => $trUpdatedNN,
-                ],
-            ],
-        ]);
-
-        // Platform time expression
-        $nowExpr = $platform instanceof SqlitePlatform ? 'CURRENT_TIMESTAMP' : 'NOW()';
-
-        // Build STR upsert SQL dynamically (include created/updated if present)
-        $strInsertCols = [$strHashCol, $strOrigCol, $strSrcCol];
-        $strInsertVals = [':hash', ':original', ':src'];
-
-        if ($strCreatedCol) { $strInsertCols[] = $strCreatedCol; $strInsertVals[] = $nowExpr; }
-        if ($strUpdatedCol) { $strInsertCols[] = $strUpdatedCol; $strInsertVals[] = $nowExpr; }
-
-        $strInsert = "INSERT INTO {$strTable} (" . implode(', ', $strInsertCols) . ") VALUES (" . implode(', ', $strInsertVals) . ")";
-
-        $strUpdateSets = [$strOrigCol . ' = EXCLUDED.' . $strOrigCol, $strSrcCol . ' = EXCLUDED.' . $strSrcCol];
-        if ($platform instanceof MySQLPlatform || $platform instanceof MariaDBPlatform) {
-            // MySQL uses VALUES() instead of EXCLUDED
-            $strUpdateSets = [$strOrigCol . ' = VALUES(' . $strOrigCol . ')', $strSrcCol . ' = VALUES(' . $strSrcCol . ')'];
-        }
-        if ($strUpdatedCol) {
-            $strUpdateSets[] = $strUpdatedCol . ' = ' . $nowExpr;
-        }
-
+        // STR upsert
         if ($platform instanceof PostgreSQLPlatform) {
-            $sqlStr = $strInsert . " ON CONFLICT ({$strHashCol}) DO UPDATE SET " . implode(', ', $strUpdateSets);
+            $sqlStr = "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
+                       VALUES (:hash, :original, :src, {$nowExpr}, {$nowExpr})
+                       ON CONFLICT (hash) DO UPDATE
+                         SET original = EXCLUDED.original,
+                             src_locale = EXCLUDED.src_locale,
+                             updated_at = {$nowExpr}";
         } elseif ($platform instanceof SqlitePlatform) {
-            $sqlStr = $strInsert . " ON CONFLICT({$strHashCol}) DO UPDATE SET " . implode(', ', array_map(
-                    static fn($set) => str_replace(['EXCLUDED.'], ['excluded.'], $set), $strUpdateSets
-                ));
+            $sqlStr = "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
+                       VALUES (:hash, :original, :src, {$nowExpr}, {$nowExpr})
+                       ON CONFLICT(hash) DO UPDATE SET
+                         original = excluded.original,
+                         src_locale = excluded.src_locale,
+                         updated_at = {$nowExpr}";
         } elseif ($platform instanceof MySQLPlatform || $platform instanceof MariaDBPlatform) {
-            $sqlStr = $strInsert . " ON DUPLICATE KEY UPDATE " . implode(', ', $strUpdateSets);
+            $sqlStr = "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
+                       VALUES (:hash, :original, :src, {$nowExpr}, {$nowExpr})
+                       ON DUPLICATE KEY UPDATE
+                         original = VALUES(original),
+                         src_locale = VALUES(src_locale),
+                         updated_at = {$nowExpr}";
         } else {
-            $this->logger->error('Unsupported DB platform for STR', ['platform' => $platform::class]);
+            $this->logger->error('Unsupported DB platform', ['platform' => $platform::class]);
             return;
         }
 
-        // Build TR ensure & upsert SQL (include created/updated/status if present)
-        $trEnsureCols = [$trHashCol, $trLocCol, $trTextCol];
-        $trEnsureVals = [':hash', ':locale', 'NULL'];
-
-        if ($trCreatedCol) { $trEnsureCols[] = $trCreatedCol; $trEnsureVals[] = $nowExpr; }
-        if ($trUpdatedCol) { $trEnsureCols[] = $trUpdatedCol; $trEnsureVals[] = $nowExpr; }
-        if ($trStatusCol)  { $trEnsureCols[] = $trStatusCol;  $trEnsureVals[] = "'untranslated'"; }
-
-        $trEnsureInsert = "INSERT INTO {$trTable} (" . implode(', ', $trEnsureCols) . ") VALUES (" . implode(', ', $trEnsureVals) . ")";
-
+        // TR ensure (nullable text => NULL)
         if ($platform instanceof PostgreSQLPlatform) {
-            $sqlTrEnsure = $trEnsureInsert . " ON CONFLICT ({$trHashCol}, {$trLocCol}) DO NOTHING";
+            $sqlTrEnsure = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, NULL, {$nowExpr}, {$nowExpr})
+                            ON CONFLICT (hash, locale) DO NOTHING";
         } elseif ($platform instanceof SqlitePlatform) {
-            $sqlTrEnsure = $trEnsureInsert . " ON CONFLICT({$trHashCol}, {$trLocCol}) DO NOTHING";
-        } elseif ($platform instanceof MySQLPlatform || $platform instanceof MariaDBPlatform) {
-            $sqlTrEnsure = $trEnsureInsert . " ON DUPLICATE KEY UPDATE {$trTextCol} = {$trTextCol}";
+            $sqlTrEnsure = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, NULL, {$nowExpr}, {$nowExpr})
+                            ON CONFLICT(hash, locale) DO NOTHING";
         } else {
-            $this->logger->error('Unsupported DB platform for TR ensure', ['platform' => $platform::class]);
-            return;
+            $sqlTrEnsure = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, NULL, {$nowExpr}, {$nowExpr})
+                            ON DUPLICATE KEY UPDATE text = text";
         }
 
-        // TR upsert with text (translated)
-        $trUpCols = [$trHashCol, $trLocCol, $trTextCol];
-        $trUpVals = [':hash', ':locale', ':text'];
-
-        if ($trCreatedCol) { $trUpCols[] = $trCreatedCol; $trUpVals[] = $nowExpr; }
-        if ($trUpdatedCol) { $trUpCols[] = $trUpdatedCol; $trUpVals[] = $nowExpr; }
-        if ($trStatusCol)  { $trUpCols[] = $trStatusCol;  $trUpVals[] = "'translated'"; }
-
-        $trUpInsert = "INSERT INTO {$trTable} (" . implode(', ', $trUpCols) . ") VALUES (" . implode(', ', $trUpVals) . ")";
-
+        // TR upsert text
         if ($platform instanceof PostgreSQLPlatform) {
-            $sets = [$trTextCol . ' = EXCLUDED.' . $trTextCol];
-            if ($trUpdatedCol) { $sets[] = $trUpdatedCol . ' = ' . $nowExpr; }
-            if ($trStatusCol)  { $sets[] = $trStatusCol . " = 'translated'"; }
-            $sqlTrUpsert = $trUpInsert . " ON CONFLICT ({$trHashCol}, {$trLocCol}) DO UPDATE SET " . implode(', ', $sets);
+            $sqlTrUpsert = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, :text, {$nowExpr}, {$nowExpr})
+                            ON CONFLICT (hash, locale) DO UPDATE
+                              SET text = EXCLUDED.text, updated_at = {$nowExpr}";
         } elseif ($platform instanceof SqlitePlatform) {
-            $sets = [$trTextCol . ' = excluded.' . $trTextCol];
-            if ($trUpdatedCol) { $sets[] = $trUpdatedCol . ' = ' . $nowExpr; }
-            if ($trStatusCol)  { $sets[] = $trStatusCol . " = 'translated'"; }
-            $sqlTrUpsert = $trUpInsert . " ON CONFLICT({$trHashCol}, {$trLocCol}) DO UPDATE SET " . implode(', ', $sets);
-        } elseif ($platform instanceof MySQLPlatform || $platform instanceof MariaDBPlatform) {
-            $sets = [$trTextCol . ' = VALUES(' . $trTextCol . ')'];
-            if ($trUpdatedCol) { $sets[] = $trUpdatedCol . ' = ' . $nowExpr; }
-            if ($trStatusCol)  { $sets[] = $trStatusCol . " = 'translated'"; }
-            $sqlTrUpsert = $trUpInsert . " ON DUPLICATE KEY UPDATE " . implode(', ', $sets);
+            $sqlTrUpsert = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, :text, {$nowExpr}, {$nowExpr})
+                            ON CONFLICT(hash, locale) DO UPDATE SET
+                              text = excluded.text, updated_at = {$nowExpr}";
         } else {
-            $this->logger->error('Unsupported DB platform for TR upsert', ['platform' => $platform::class]);
-            return;
+            $sqlTrUpsert = "INSERT INTO {$trTable} (hash, locale, text, created_at, updated_at)
+                            VALUES (:hash, :locale, :text, {$nowExpr}, {$nowExpr})
+                            ON DUPLICATE KEY UPDATE
+                              text = VALUES(text), updated_at = {$nowExpr}";
         }
 
-        $locales = $this->enabledLocales !== [] ? $this->enabledLocales : [$this->defaultLocale];
-        if ($locales === []) {
-            $this->logger->warning('No locales resolved; will only upsert STR, no STR_TR rows.');
-        }
+        $locales = $this->locale->getEnabled() ?: [$this->locale->getDefault()];
+        \assert($locales !== [], 'enabled_locales must not be empty');
 
-        $startedTx = false;
+        $started = false;
         try {
             if (!$conn->isTransactionActive()) {
                 $conn->beginTransaction();
-                $startedTx = true;
+                $started = true;
             }
 
-            // Upsert STR + ensure TR rows exist for all locales
             foreach ($this->pending as $hash => $row) {
-                $params = ['hash' => $hash, 'original' => $row['original'], 'src' => $row['src']];
-                $affected = $conn->executeStatement($sqlStr, $params);
-                $this->logger->debug('STR upsert', ['hash' => $hash, 'affected' => $affected]);
-
+                $conn->executeStatement($sqlStr, [
+                    'hash'     => $hash,
+                    'original' => $row['original'],
+                    'src'      => $row['src'],
+                ]);
                 foreach ($locales as $loc) {
-                    $p = ['hash' => $hash, 'locale' => (string) $loc];
-                    $a = $conn->executeStatement($sqlTrEnsure, $p);
-                    $this->logger->debug('TR ensure', ['hash' => $hash, 'locale' => $loc, 'affected' => $a]);
+                    $conn->executeStatement($sqlTrEnsure, [
+                        'hash'   => $hash,
+                        'locale' => (string) $loc,
+                    ]);
                 }
             }
 
-            // Upsert any immediate texts provided by the entity
-            foreach ($this->pendingWithText as $row) {
-                $a = $conn->executeStatement($sqlTrUpsert, $row);
-                $this->logger->debug('TR upsert text', [
-                    'hash' => $row['hash'], 'locale' => $row['locale'], 'affected' => $a
-                ]);
+            foreach ($this->pendingWithText as $r) {
+                $conn->executeStatement($sqlTrUpsert, $r);
             }
 
-            if ($startedTx) {
+            if ($started) {
                 $conn->commit();
             }
-            $this->logger->info('Babel postFlush finished successfully');
         } catch (\Throwable $e) {
-            if ($startedTx && $conn->isTransactionActive()) {
+            if ($started && $conn->isTransactionActive()) {
                 $conn->rollBack();
             }
             $this->logger->error('Babel postFlush failed', [
                 'exception' => $e::class,
                 'message'   => $e->getMessage(),
-                'sql_str'   => $sqlStr ?? null,
-                'sql_tr_ensure' => $sqlTrEnsure ?? null,
-                'sql_tr_upsert' => $sqlTrUpsert ?? null,
             ]);
         } finally {
             $this->pending = [];
@@ -272,64 +169,67 @@ final class StringBackedTranslatableFlushSubscriber
         }
     }
 
-    /** Collect changed translatable values from the UoW */
-    private function collectTranslatables(UnitOfWork $uow): void
+    /**
+     * Walk scheduled entities and enqueue rows using the compile-time index.
+     * Backing prop convention: "<field>_backing".
+     * Source locale precedence: entity->srcLocale ?? LocaleContext->get()
+     */
+    private function collect(UnitOfWork $uow): void
     {
         $entities = array_merge(
             $uow->getScheduledEntityInsertions(),
             $uow->getScheduledEntityUpdates()
         );
 
-        $seenEntities = 0;
-        foreach ($entities as $entity) {
-            $seenEntities++;
-            $rc = new ReflectionClass($entity);
+        foreach ($entities as $e) {
+            $class  = $e::class;
+            $fields = $this->index->fieldsFor($class);
+            if ($fields === []) {
+                continue;
+            }
 
-            foreach ($rc->getProperties() as $rp) {
-                $attrs = $rp->getAttributes(Translatable::class);
-                if (!$attrs) {
+            $src = null;
+            if (\property_exists($e, 'srcLocale')) {
+                $src = \is_string($e->srcLocale) && $e->srcLocale !== '' ? $e->srcLocale : null;
+            }
+            $srcLocale = $src ?? $this->locale->get();
+
+            $cfg = $this->index->configFor($class);
+            $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
+
+            foreach ($fields as $field) {
+                $backing = $field . '_backing';
+                if (!\property_exists($e, $backing)) {
+                    continue;
+                }
+                $original = $e->$backing ?? null;
+                if (!\is_string($original) || $original === '') {
                     continue;
                 }
 
-                $rp->setAccessible(true);
-                $original = $rp->getValue($entity);
-
-                if (!\is_string($original) || $original === '') {
-                    continue; // nothing to index
-                }
-
-                $hash = sha1($original);
-
-                $src = null;
-                if (property_exists($entity, 'srcLocale')) {
-                    $src = \is_string($entity->srcLocale) && $entity->srcLocale !== '' ? $entity->srcLocale : null;
-                }
+                $context = $fieldCfg[$field]['context'] ?? null;
+                $hash = BabelHasher::forString($srcLocale, $context, $original);
 
                 $this->pending[$hash] = [
                     'original' => $original,
-                    'src'      => $src ?? $this->defaultLocale,
+                    'src'      => $srcLocale,
                 ];
-            }
 
-            if (property_exists($entity, '_pendingTranslations') && \is_array($entity->_pendingTranslations ?? null)) {
-                foreach ($entity->_pendingTranslations as $field => $pairs) {
-                    if (!\is_array($pairs)) continue;
-                    foreach ($pairs as $loc => $txt) {
-                        if (!\is_string($loc) || !\is_string($txt) || $txt === '') continue;
-                        $backingProp = $field . '_backing';
-                        if (!property_exists($entity, $backingProp)) continue;
-                        $val = $entity->$backingProp ?? null;
-                        if (!\is_string($val) || $val === '') continue;
-                        $this->pendingWithText[] = [
-                            'hash'   => sha1($val),
-                            'locale' => $loc,
-                            'text'   => $txt,
-                        ];
+                // Optional immediate texts: $_pendingTranslations[field][locale] = text
+                if (\property_exists($e, '_pendingTranslations') && \is_array($e->_pendingTranslations ?? null)) {
+                    $pairs = $e->_pendingTranslations[$field] ?? null;
+                    if (\is_array($pairs)) {
+                        foreach ($pairs as $loc => $txt) {
+                            if (!\is_string($loc) || !\is_string($txt) || $txt === '') continue;
+                            $this->pendingWithText[] = [
+                                'hash'   => $hash,
+                                'locale' => $loc,
+                                'text'   => $txt,
+                            ];
+                        }
                     }
                 }
             }
         }
-
-        $this->logger->debug('Babel onFlush scanned entities', ['count' => $seenEntities]);
     }
 }

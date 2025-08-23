@@ -7,83 +7,82 @@ use Doctrine\Bundle\DoctrineBundle\Attribute\AsDoctrineListener;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Survos\BabelBundle\Entity\StrTranslation;
+use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
+use Survos\BabelBundle\Util\BabelHasher;
 
 /**
- * Hydrates string-backed translations on PostLoad using the compile-time index.
- *
- * Assumptions:
- *  - TranslatableIndex contains this FQCN with 'fields' = fieldName => meta
- *  - Each field uses a backing prop named "<field>_backing" (public, PHP 8.4 hooks OK)
- *  - Hash algo matches write-side subscriber: sha1($original)
- *  - Host entity exposes public array $_i18n assigned as $_i18n[locale][field] = text
- *  - Canonical StrTranslation mapping (hash, locale, text) exists
+ * Hydrates $_i18n[locale][field] for string-backed fields using the compile-time index.
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
 {
     public function __construct(
         private readonly TranslatableIndex $index,
+        private readonly LocaleContext $locale,
     ) {}
 
     public function postLoad(PostLoadEventArgs $args): void
     {
         $em     = $args->getObjectManager();
         $entity = $args->getObject();
-        $fqcn   = $entity::class;
+        $class  = $entity::class;
 
-        $fields = $this->index->fieldsFor($fqcn);
+        $fields = $this->index->fieldsFor($class);
         if ($fields === []) {
             return;
         }
 
-        // 2) Collect hashes for all fields that have a non-empty backing value
+        $cfg = $this->index->configFor($class);
+        $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
+
+        // choose the same src used for hashing on write
+        $src = null;
+        if (\property_exists($entity, 'srcLocale')) {
+            $src = \is_string($entity->srcLocale) && $entity->srcLocale !== '' ? $entity->srcLocale : null;
+        }
+        $srcLocale = $src ?? $this->locale->get();
+
+        // Build hashes per field
         $fieldToHash = [];
         foreach ($fields as $field) {
             $backing = $field . '_backing';
-            if (!\property_exists($entity, $backing)) {
-                continue;
-            }
-            $original = $entity->$backing ?? null;
-            if (!\is_string($original) || $original === '') {
-                continue;
-            }
-            $fieldToHash[$field] = sha1($original);
-        }
-        if ($fieldToHash === []) {
-            return;
-        }
+            if (!\property_exists($entity, $backing)) continue;
 
-        // 3) Single IN query for all hashes → rows: [hash, locale, text]
-        $trRepo = $em->getRepository(StrTranslation::class);
-        $rows = $trRepo->createQueryBuilder('t')
+            $original = $entity->$backing ?? null;
+            if (!\is_string($original) || $original === '') continue;
+
+            $context = $fieldCfg[$field]['context'] ?? null;
+            $fieldToHash[$field] = BabelHasher::forString($srcLocale, $context, $original);
+        }
+        if ($fieldToHash === []) return;
+
+        // Fetch translations for all hashes
+        $repo = $em->getRepository(StrTranslation::class);
+        $rows = $repo->createQueryBuilder('t')
             ->select('t.hash AS hash', 't.locale AS locale', 't.text AS text')
             ->andWhere('t.hash IN (:hashes)')
             ->setParameter('hashes', array_values($fieldToHash))
             ->getQuery()->getArrayResult();
 
-        // 4) Bucket by hash/locale
         $byHashLocale = [];
         foreach ($rows as $r) {
             $h = (string) ($r['hash'] ?? '');
             $l = (string) ($r['locale'] ?? '');
             $v = $r['text'] ?? null;
             if ($h !== '' && $l !== '') {
-                $byHashLocale[$h][$l] = \is_string($v) ? $v : '';
+                $byHashLocale[$h][$l] = \is_string($v) ? $v : null; // keep NULL if not translated yet
             }
         }
 
-        // 5) Ensure $_i18n exists and fill it
         if (!\property_exists($entity, '_i18n') || !\is_array($entity->_i18n ?? null)) {
             $entity->_i18n = [];
         }
 
         foreach ($fieldToHash as $field => $hash) {
-            if (!isset($byHashLocale[$hash])) {
-                continue;
-            }
-            foreach ($byHashLocale[$hash] as $locale => $text) {
-                $entity->_i18n[$locale][$field] = $text;
+            if (!isset($byHashLocale[$hash])) continue;
+            foreach ($byHashLocale[$hash] as $loc => $text) {
+                $entity->_i18n[$loc][$field] = $text;
             }
         }
     }

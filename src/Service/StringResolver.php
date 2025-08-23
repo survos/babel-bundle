@@ -4,58 +4,77 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Service;
 
 use Doctrine\Persistence\ManagerRegistry;
-use Survos\BabelBundle\Entity\Str;
 
 /**
- * Resolve string codes -> localized text with a per-request cache
- * and fallback to original when a locale entry is missing.
+ * Read-only helpers for Str / StrTranslation using DBAL + metadata.
  */
 final class StringResolver
 {
-    /** @var array<string, array<string,string>> code => [locale => text] */
-    private array $cache = [];
-
-    public function __construct(private ManagerRegistry $registry) {}
+    public function __construct(private readonly ManagerRegistry $registry) {}
 
     /**
-     * @param list<string> $codes
-     * @return array<string,string> code => text
+     * @return array<string, array{original:string, src:string, context:?string}>
      */
-    public function resolve(array $codes, string $locale, ?string $emName = null): array
+    public function getStrRowsByHashes(array $hashes, ?string $emName = null): array
     {
-        // normalize + dedupe
-        $codes = array_values(array_unique(array_filter($codes, 'strlen')));
-        if (!$codes) { return []; }
+        if ($hashes === []) return [];
 
-        // find codes not cached for this locale
-        $missing = [];
-        foreach ($codes as $c) {
-            if (!isset($this->cache[$c][$locale])) {
-                $missing[] = $c;
-            }
+        $em   = $this->registry->getManager($emName);
+        $conn = $em->getConnection();
+
+        $strMeta  = $em->getClassMetadata(\App\Entity\Str::class);
+        $table    = $strMeta->getTableName();
+        $colHash  = $strMeta->getColumnName('hash');
+        $colOrig  = $strMeta->getColumnName('original');
+        $colSrc   = $strMeta->getColumnName('srcLocale');
+        $colCtx   = $strMeta->hasField('context') ? $strMeta->getColumnName('context') : null;
+
+        $sql = sprintf(
+            'SELECT %s AS hash, %s AS original, %s AS src, %s AS ctx FROM %s WHERE %s IN (?)',
+            $colHash, $colOrig, $colSrc, $colCtx ? $colCtx : 'NULL', $table, $colHash
+        );
+        $stmt = $conn->executeQuery($sql, [$hashes], [\Doctrine\DBAL\ArrayParameterType::STRING]);
+
+        $rows = [];
+        while ($r = $stmt->fetchAssociative()) {
+            $rows[(string)$r['hash']] = [
+                'original' => (string)$r['original'],
+                'src'      => (string)$r['src'],
+                'context'  => $r['ctx'] !== null ? (string)$r['ctx'] : null,
+            ];
         }
+        return $rows;
+    }
 
-        if ($missing) {
-            $em   = $this->registry->getManager($emName);
-            $repo = $em->getRepository(Str::class);
+    /**
+     * @return array<string, array<string,string|null>> map[hash][locale] = text|null
+     */
+    public function getTranslationsForHashes(array $hashes, ?string $emName = null): array
+    {
+        if ($hashes === []) return [];
 
-            /** @var iterable<Str> $rows */
-            $rows = $repo->findBy(['code' => $missing]);
-            foreach ($rows as $s) {
-                $t = $s->t; // denormalized map: locale => text
-                $this->cache[$s->code][$locale] = $t[$locale] ?? $s->original;
-            }
+        $em   = $this->registry->getManager($emName);
+        $conn = $em->getConnection();
 
-            // ensure unknown codes don't trigger notices later
-            foreach ($missing as $c) {
-                $this->cache[$c][$locale] ??= '';
-            }
-        }
+        $trMeta  = $em->getClassMetadata(\App\Entity\StrTranslation::class);
+        $table   = $trMeta->getTableName();
+        $colHash = $trMeta->getColumnName('hash');
+        $colLoc  = $trMeta->getColumnName('locale');
+        $colText = $trMeta->getColumnName('text');
 
-        // build output in original order
+        $sql = sprintf(
+            'SELECT %s AS hash, %s AS locale, %s AS text FROM %s WHERE %s IN (?)',
+            $colHash, $colLoc, $colText, $table, $colHash
+        );
+
+        $stmt = $conn->executeQuery($sql, [$hashes], [\Doctrine\DBAL\ArrayParameterType::STRING]);
+
         $out = [];
-        foreach ($codes as $c) {
-            $out[$c] = $this->cache[$c][$locale] ?? '';
+        while ($r = $stmt->fetchAssociative()) {
+            $h = (string)$r['hash'];
+            $l = (string)$r['locale'];
+            $t = $r['text']; // may be NULL (nullable text)
+            $out[$h][$l] = \is_string($t) ? $t : null;
         }
         return $out;
     }
