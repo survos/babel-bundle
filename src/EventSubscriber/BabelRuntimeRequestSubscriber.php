@@ -13,8 +13,8 @@ use Symfony\Component\HttpKernel\KernelEvents;
 final class BabelRuntimeRequestSubscriber implements EventSubscriberInterface
 {
     public function __construct(
-        private readonly TranslatorInterface $translator,
         private readonly LocaleContext $localeContext,
+        private readonly ?TranslatorInterface $translator=null,
         private readonly string $fallbackLocale = 'en',
     ) {}
 

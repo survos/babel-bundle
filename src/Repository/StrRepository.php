@@ -50,6 +50,7 @@ final class StrRepository extends ServiceEntityRepository
             $stmt = $conn->prepare($sql);
             foreach ($items as [$code, $original, $srcLocale]) {
                 $params = \array_combine($paramsPerRow, [$code, $original, $srcLocale]);
+                dd($params);
                 $stmt->executeStatement($params);
                 $affected++;
             }
