@@ -30,6 +30,7 @@ abstract class StrBase
     #[ORM\Column]
     public \DateTimeImmutable $updatedAt;
 
+    // the PostFlushListener creates this in raw SQL so the constructor is rarely called.
     public function __construct(string $hash, string $original, string $srcLocale, ?string $context = null)
     {
         $this->hash      = $hash;

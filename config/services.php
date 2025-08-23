@@ -5,6 +5,7 @@ namespace Symfony\Component\DependencyInjection\Loader\Configurator;
 
 use Survos\BabelBundle\Cache\TranslatableMapWarmer;
 use Survos\BabelBundle\Command\BabelBrowseCommand;
+use Survos\BabelBundle\Command\BabelDebugSchemaCommand;
 use Survos\BabelBundle\Command\BabelTranslatableDumpCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Command\PopulateMissingCommand;
@@ -41,8 +42,11 @@ return static function (ContainerConfigurator $c): void {
     $s->load('Survos\\BabelBundle\\EventListener\\', __DIR__ . '/../src/EventListener/');
     $s->load('Survos\\BabelBundle\\EventSubscriber\\', __DIR__ . '/../src/EventSubscriber/'); // if any
 
-    // Translator abstraction -> concrete (LibreTranslate adapter in prod)
-    $s->alias(TranslatorInterface::class, TranslationClientService::class)->public();
+    if (class_exists(\Survos\LibreTranslateBundle\Service\TranslationClientService::class)) {
+        // Translator abstraction -> concrete (LibreTranslate adapter in prod)
+        $s->alias(TranslatorInterface::class, TranslationClientService::class)->public();
+    }
+
 
     // Engines
     $s->set(CodeStorage::class)
@@ -75,7 +79,9 @@ return static function (ContainerConfigurator $c): void {
 
     // Commands
 
-    foreach ([BabelBrowseCommand::class, BabelTranslatableDumpCommand::class] as $commandClass) {
+    foreach ([BabelBrowseCommand::class,
+                 BabelDebugSchemaCommand::class,
+                 BabelTranslatableDumpCommand::class] as $commandClass) {
         $s->set($commandClass)
             ->public()
             ->autoconfigure(true)
