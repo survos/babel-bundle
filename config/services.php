@@ -33,7 +33,13 @@ return static function (ContainerConfigurator $c): void {
             \dirname(__DIR__) . '/src/Traits/',
             \dirname(__DIR__) . '/src/Resources/',
             \dirname(__DIR__) . '/src/Tests/',
+            \dirname(__DIR__) . '/src/Event/',
+            \dirname(__DIR__) . '/src/Kernel.php',
+//            __DIR__ . '/../src/DependencyInjection/',
         ]);
+
+    $s->load('Survos\\BabelBundle\\EventListener\\', __DIR__ . '/../src/EventListener/');
+    $s->load('Survos\\BabelBundle\\EventSubscriber\\', __DIR__ . '/../src/EventSubscriber/'); // if any
 
     // Translator abstraction -> concrete (LibreTranslate adapter in prod)
     $s->alias(TranslatorInterface::class, TranslationClientService::class)->public();
