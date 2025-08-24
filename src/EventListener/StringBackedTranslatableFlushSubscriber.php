@@ -15,32 +15,24 @@ use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\BabelBundle\Util\BabelHasher;
 
-/**
- * Property-mode write path (string-backed fields).
- * Collect on prePersist/preUpdate/onFlush, drain to DBAL on postFlush.
- */
 #[AsDoctrineListener(event: Events::prePersist)]
 #[AsDoctrineListener(event: Events::preUpdate)]
 #[AsDoctrineListener(event: Events::onFlush)]
 #[AsDoctrineListener(event: Events::postFlush)]
 final class StringBackedTranslatableFlushSubscriber
 {
-    /** @var array<string, array{hash:string, original:string, src:string}> keyed by hash */
+    /** @var array<string, array{hash:string, original:string, src:string}> */
     private array $queueStr = [];
-    /** @var array<string, array{hash:string, locale:string, text:string}> keyed by "hash|locale" */
+    /** @var array<string, array{hash:string, locale:string, text:string}> */
     private array $queueTr  = [];
 
-    /**
-     * @param array<int,string> $enabledLocales Inject %kernel.enabled_locales% (optional). If empty, only source is written.
-     */
+    /** @param list<string> $enabledLocales */
     public function __construct(
         private readonly LoggerInterface $logger,
         private readonly LocaleContext $locale,
         private readonly TranslatableIndex $index,
         private readonly array $enabledLocales = [],
     ) {}
-
-    /* ---------------------------- collectors ---------------------------- */
 
     public function prePersist(PrePersistEventArgs $args): void
     {
@@ -74,26 +66,17 @@ final class StringBackedTranslatableFlushSubscriber
         ]);
     }
 
-    /**
-     * Returns number of fields collected for this entity.
-     */
     private function collectFromEntity(object $entity, string $phase): int
     {
         $class  = $entity::class;
         $fields = $this->index->fieldsFor($class);
-        if ($fields === []) {
-            return 0;
-        }
+        if ($fields === []) return 0;
 
-        // Require hooks API, fail fast if missing
         if (!\method_exists($entity, 'getBackingValue')) {
-            $this->logger->warning('Babel collect: entity missing hooks API; skipping.', [
-                'class' => $class, 'phase' => $phase,
-            ]);
+            $this->logger->warning('Babel collect: entity missing hooks API; skipping.', ['class'=>$class,'phase'=>$phase]);
             return 0;
         }
 
-        // Source locale from TranslatableIndex localeProp (#[BabelLocale]) else bundle default
         $srcLocale = $this->resolveSourceLocale($entity, $class);
 
         $cfg      = $this->index->configFor($class);
@@ -103,39 +86,23 @@ final class StringBackedTranslatableFlushSubscriber
 
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
-            if (!\is_string($original) || $original === '') {
-                continue;
-            }
+            if (!\is_string($original) || $original === '') continue;
 
             $context = $fieldCfg[$field]['context'] ?? null;
             $hash    = BabelHasher::forString($srcLocale, $context, $original);
 
             // STR (dedupe by hash)
-            $this->queueStr[$hash] = [
-                'hash'     => $hash,
-                'original' => $original,
-                'src'      => $srcLocale,
-            ];
+            $this->queueStr[$hash] = ['hash'=>$hash,'original'=>$original,'src'=>$srcLocale];
 
             // Source TR
-            $this->queueTr[$hash.'|'.$srcLocale] = [
-                'hash'   => $hash,
-                'locale' => $srcLocale,
-                'text'   => $original,
-            ];
+            $this->queueTr[$hash.'|'.$srcLocale] = ['hash'=>$hash,'locale'=>$srcLocale,'text'=>$original];
 
-            // Placeholders for other locales
+            // Placeholders (insert-if-missing)
             foreach ($this->enabledLocales as $loc) {
-                if (!\is_string($loc) || $loc === '' || $loc === $srcLocale) {
-                    continue;
-                }
+                if (!\is_string($loc) || $loc === '' || $loc === $srcLocale) continue;
                 $k = $hash.'|'.$loc;
                 if (!isset($this->queueTr[$k])) {
-                    $this->queueTr[$k] = [
-                        'hash'   => $hash,
-                        'locale' => $loc,
-                        'text'   => '',
-                    ];
+                    $this->queueTr[$k] = ['hash'=>$hash,'locale'=>$loc,'text'=>'']; // marker
                 }
             }
 
@@ -145,98 +112,75 @@ final class StringBackedTranslatableFlushSubscriber
         return $collected;
     }
 
-    /* ---------------------------- drainer ---------------------------- */
-
     public function postFlush(PostFlushEventArgs $args): void
     {
-        if ($this->queueStr === [] && $this->queueTr === []) {
-            return;
-        }
+        if ($this->queueStr === [] && $this->queueTr === []) return;
 
         $conn = $args->getObjectManager()->getConnection();
 
-        $strWrote = 0;
         foreach ($this->queueStr as $row) {
             $this->upsertStr($conn, $row['hash'], $row['original'], $row['src']);
-            $strWrote++;
         }
 
-        $trWrote = 0;
         foreach ($this->queueTr as $row) {
-            $this->upsertTranslation($conn, $row['hash'], $row['locale'], $row['text']);
-            $trWrote++;
+            if ($row['text'] === '') {
+                $this->insertPlaceholderIfMissing($conn, $row['hash'], $row['locale']);
+            } else {
+                $this->upsertTranslation($conn, $row['hash'], $row['locale'], $row['text']);
+            }
         }
 
         $this->queueStr = [];
         $this->queueTr  = [];
-
-        $this->logger->info('Babel postFlush drained', ['str' => $strWrote, 'tr' => $trWrote]);
+        $this->logger->info('Babel postFlush drained');
     }
 
-    /* ---------------------------- DB helpers ---------------------------- */
+    /* DB helpers */
 
     private function upsertStr(Connection $conn, string $hash, string $original, string $src): void
     {
         $now = 'CURRENT_TIMESTAMP';
-
-        $sqlUpdate = 'UPDATE str
-                      SET original = :original,
-                          src_locale = :src,
-                          updated_at = '.$now.'
-                      WHERE hash = :hash';
-        $updated = $conn->executeStatement($sqlUpdate, [
-            'original' => $original, 'src' => $src, 'hash' => $hash,
-        ]);
-
-        if ($updated > 0) {
-            return;
-        }
+        $sqlUpdate = 'UPDATE str SET original=:original, src_locale=:src, updated_at='.$now.' WHERE hash=:hash';
+        $updated = $conn->executeStatement($sqlUpdate, ['original'=>$original,'src'=>$src,'hash'=>$hash]);
+        if ($updated > 0) return;
 
         try {
             $sqlInsert = 'INSERT INTO str (hash, original, src_locale, created_at, updated_at)
                           VALUES (:hash, :original, :src, '.$now.', '.$now.')';
-            $conn->executeStatement($sqlInsert, [
-                'hash' => $hash, 'original' => $original, 'src' => $src,
-            ]);
+            $conn->executeStatement($sqlInsert, ['hash'=>$hash,'original'=>$original,'src'=>$src]);
         } catch (\Throwable) {
-            $conn->executeStatement($sqlUpdate, [
-                'original' => $original, 'src' => $src, 'hash' => $hash,
-            ]);
+            $conn->executeStatement($sqlUpdate, ['original'=>$original,'src'=>$src,'hash'=>$hash]);
         }
     }
 
     private function upsertTranslation(Connection $conn, string $hash, string $locale, string $text): void
     {
         $now = 'CURRENT_TIMESTAMP';
-
-        $sqlUpdate = 'UPDATE str_translation
-                      SET text = :text,
-                          updated_at = '.$now.'
-                      WHERE hash = :hash AND locale = :locale';
-        $updated = $conn->executeStatement($sqlUpdate, [
-            'text' => $text, 'hash' => $hash, 'locale' => $locale,
-        ]);
-
-        if ($updated > 0) {
-            return;
-        }
+        $sqlUpdate = 'UPDATE str_translation SET text=:text, updated_at='.$now.' WHERE hash=:hash AND locale=:loc';
+        $updated = $conn->executeStatement($sqlUpdate, ['text'=>$text,'hash'=>$hash,'loc'=>$locale]);
+        if ($updated > 0) return;
 
         try {
             $sqlInsert = 'INSERT INTO str_translation (hash, locale, text, created_at, updated_at)
-                          VALUES (:hash, :locale, :text, '.$now.', '.$now.')';
-            $conn->executeStatement($sqlInsert, [
-                'hash' => $hash, 'locale' => $locale, 'text' => $text,
-            ]);
+                          VALUES (:hash, :loc, :text, '.$now.', '.$now.')';
+            $conn->executeStatement($sqlInsert, ['hash'=>$hash,'loc'=>$locale,'text'=>$text]);
         } catch (\Throwable) {
-            $conn->executeStatement($sqlUpdate, [
-                'text' => $text, 'hash' => $hash, 'locale' => $locale,
-            ]);
+            $conn->executeStatement($sqlUpdate, ['text'=>$text,'hash'=>$hash,'loc'=>$locale]);
         }
     }
 
-    /**
-     * Source locale from TranslatableIndex (#[BabelLocale] → localeProp), else bundle default.
-     */
+    private function insertPlaceholderIfMissing(Connection $conn, string $hash, string $locale): void
+    {
+        $now = 'CURRENT_TIMESTAMP';
+        try {
+            $sqlInsert = 'INSERT INTO str_translation (hash, locale, text, created_at, updated_at)
+                          VALUES (:hash, :loc, :text, '.$now.', '.$now.')';
+            $conn->executeStatement($sqlInsert, ['hash'=>$hash,'loc'=>$locale,'text'=>'']);
+        } catch (\Throwable) {
+            // exists – noop
+        }
+    }
+
     private function resolveSourceLocale(object $entity, string $class): string
     {
         $current = $this->locale->get();
@@ -245,22 +189,17 @@ final class StringBackedTranslatableFlushSubscriber
         $cfg  = $this->index->configFor($class);
         $prop = \is_string($cfg['localeProp'] ?? null) ? $cfg['localeProp'] : null;
 
-        if ($prop !== null && $prop !== '') {
-            $getter = 'get' . \ucfirst($prop);
+        if ($prop) {
+            $getter = 'get'.\ucfirst($prop);
             if (\method_exists($entity, $getter)) {
                 $val = $entity->$getter();
-                if (\is_string($val) && $val !== '') {
-                    return $val;
-                }
+                if (\is_string($val) && $val !== '') return $val;
             }
             if (\property_exists($entity, $prop)) {
                 $val = $entity->$prop ?? null;
-                if (\is_string($val) && $val !== '') {
-                    return $val;
-                }
+                if (\is_string($val) && $val !== '') return $val;
             }
         }
-
         return $default;
     }
 }
