@@ -168,13 +168,7 @@ final class StringBackedTranslatableFlushSubscriber
             $this->pendingWithText = [];
         }
     }
-
-    /**
-     * Walk scheduled entities and enqueue rows using the compile-time index.
-     * Backing prop convention: "<field>_backing".
-     * Source locale precedence: entity->srcLocale ?? LocaleContext->get()
-     */
-    private function collect(UnitOfWork $uow): void
+    private function collect(\Doctrine\ORM\UnitOfWork $uow): void
     {
         $entities = array_merge(
             $uow->getScheduledEntityInsertions(),
@@ -184,10 +178,9 @@ final class StringBackedTranslatableFlushSubscriber
         foreach ($entities as $e) {
             $class  = $e::class;
             $fields = $this->index->fieldsFor($class);
-            if ($fields === []) {
-                continue;
-            }
+            if ($fields === []) continue;
 
+            // source locale: entity->srcLocale ?? LocaleContext->get()
             $src = null;
             if (\property_exists($e, 'srcLocale')) {
                 $src = \is_string($e->srcLocale) && $e->srcLocale !== '' ? $e->srcLocale : null;
@@ -198,22 +191,13 @@ final class StringBackedTranslatableFlushSubscriber
             $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
 
             foreach ($fields as $field) {
-                $backing = $field . '_backing';
-                if (!\property_exists($e, $backing)) {
-                    continue;
-                }
-                $original = $e->$backing ?? null;
-                if (!\is_string($original) || $original === '') {
-                    continue;
-                }
+                $original = $this->readBacking($e, $field);
+                if (!\is_string($original) || $original === '') continue;
 
                 $context = $fieldCfg[$field]['context'] ?? null;
-                $hash = BabelHasher::forString($srcLocale, $context, $original);
+                $hash = \Survos\BabelBundle\Util\BabelHasher::forString($srcLocale, $context, $original);
 
-                $this->pending[$hash] = [
-                    'original' => $original,
-                    'src'      => $srcLocale,
-                ];
+                $this->pending[$hash] = ['original' => $original, 'src' => $srcLocale];
 
                 // Optional immediate texts: $_pendingTranslations[field][locale] = text
                 if (\property_exists($e, '_pendingTranslations') && \is_array($e->_pendingTranslations ?? null)) {
@@ -221,15 +205,44 @@ final class StringBackedTranslatableFlushSubscriber
                     if (\is_array($pairs)) {
                         foreach ($pairs as $loc => $txt) {
                             if (!\is_string($loc) || !\is_string($txt) || $txt === '') continue;
-                            $this->pendingWithText[] = [
-                                'hash'   => $hash,
-                                'locale' => $loc,
-                                'text'   => $txt,
-                            ];
+                            $this->pendingWithText[] = ['hash' => $hash, 'locale' => $loc, 'text' => $txt];
                         }
                     }
                 }
             }
         }
     }
+
+    /**
+     * Read backing value for a field, supporting:
+     *  - snake_case: "<field>_backing"  (public prop)
+     *  - camelCase:  "<field>Backing"   (public prop)
+     *  - getter:     "get<Field>Backing()" (public method; allows private backing)
+     */
+    private function readBacking(object $e, string $field): ?string
+    {
+        $snake  = $field . '_backing';
+        $camel  = $field . 'Backing';
+        $getter = 'get' . ucfirst($field) . 'Backing';
+
+        if (method_exists($e, $getter)) {
+            $v = $e->$getter();
+            return \is_string($v) ? $v : null;
+        }
+
+        if (property_exists($e, $snake)) {
+            /** @var mixed $v */
+            $v = $e->$snake ?? null;
+            return \is_string($v) ? $v : null;
+        }
+
+        if (property_exists($e, $camel)) {
+            /** @var mixed $v */
+            $v = $e->$camel ?? null;
+            return \is_string($v) ? $v : null;
+        }
+
+        return null;
+    }
+
 }

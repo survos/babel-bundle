@@ -36,6 +36,7 @@
     "nikic/php-parser": "^5",
     "nette/php-generator": "^4",
     "phpstan/phpstan": "^2.1",
-    "phpunit/phpunit": "^12.3"
+    "phpunit/phpunit": "^12.3",
+    "survos/translator-bundle": "dev-main"
   }
 }

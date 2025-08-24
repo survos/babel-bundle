@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-namespace App\Repository\Base;
+namespace Survos\BabelBundle\Repository\Base;
 
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 

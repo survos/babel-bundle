@@ -5,41 +5,45 @@ namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Survos\BabelBundle\Service\LocaleContext;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * Assumptions (canonical schema + public props):
- *   Str:            hash:string (PK), original:string, srcLocale:?string
- *   StrTranslation: hash:string, locale:string, text:?string, status:?string, updatedAt:?DateTimeImmutable
+ * Ensure there is a StrTranslation row for each (hash, targetLocale).
+ * Useful as a backfill if some strings predate the onFlush/postFlush upserter.
  */
-#[AsCommand('babel:populate', 'Create missing StrTranslation rows for the target locale(s) (string-backed)')]
-final class PopulateMissingCommand
+#[AsCommand('babel:translations:ensure', 'Ensure (hash, locale) rows exist in str_translation for target locale(s)')]
+final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
-        private readonly string $defaultLocale = 'en',
-        /** @var string[] */
-        private readonly array $enabledLocales = [],
-    ) {}
+        private LocaleContext $localeContext,
+    ) {
+//        parent::__construct();
+    }
 
     public function __invoke(
         SymfonyStyle $io,
+        InputInterface $input,
         #[Argument('Target locales (comma-delimited) or empty to use --all')] ?string $localesArg = null,
         #[Option('Use all framework.enabled_locales when locales argument is empty')] bool $all = false,
         #[Option('Filter by source (Str.srcLocale) when present')] ?string $source = null,
         #[Option('Batch size for flush/clear')] int $batchSize = 500,
         #[Option('Limit rows per locale (0 = unlimited)')] int $limit = 0,
         #[Option('Dry-run: do not write')] bool $dryRun = false,
-        #[Option('Str entity FQCN')] string $strClass = 'Survos\\BabelBundle\\Entity\\Str',
-        #[Option('StrTranslation entity FQCN')] string $trClass = 'Survos\\BabelBundle\\Entity\\StrTranslation',
+        #[Option('Str entity FQCN')] string $strClass = 'App\\Entity\\Str',
+        #[Option('StrTranslation entity FQCN')] string $trClass = 'App\\Entity\\StrTranslation',
     ): int {
-        // Resolve target locales
-        $targets = $this->resolveTargetLocales($io, $localesArg, $all);
-        if ($targets === null) return 1;
+//        $this->applyLocaleOverride($input);
+
+//        $targets = $this->resolveTargetLocales($io, null, $all);
+        $targets = $this->localeContext->getEnabled();
 
         if (!class_exists($strClass) || !class_exists($trClass)) {
             $io->error('Str/StrTranslation classes not found. Adjust --str-class/--tr-class.');
@@ -51,32 +55,24 @@ final class PopulateMissingCommand
         foreach ($targets as $locale) {
             $io->section("Locale: {$locale}");
 
-            // Always re-acquire repos after any clear()
             $strRepo = $this->em->getRepository($strClass);
             $trRepo  = $this->em->getRepository($trClass);
 
-            // Query Str rows (optionally filtered by srcLocale)
             $qb = $strRepo->createQueryBuilder('s');
             if ($source !== null) {
                 $qb->andWhere('s.srcLocale = :src')->setParameter('src', $source);
             }
-            if ($limit > 0) {
-                $qb->setMaxResults($limit);
-            }
+            if ($limit > 0) $qb->setMaxResults($limit);
 
             $iter = $qb->getQuery()->toIterable();
-            $created = 0;
-            $seen = 0;
+            $created = 0; $seen = 0;
 
             foreach ($iter as $str) {
-                /** @var object $str expects public props: hash, original, srcLocale */
+                /** @var object $str */
                 $seen++;
+                if (!\is_string($str->hash) || $str->hash === '') continue;
 
-                if (!\is_string($str->hash) || $str->hash === '') {
-                    continue;
-                }
-
-                // Exists? (canonical fields)
+                // Exists?
                 $exists = (bool) $trRepo->createQueryBuilder('t')
                     ->select('t.hash')
                     ->andWhere('t.hash = :h AND t.locale = :l')
@@ -84,23 +80,12 @@ final class PopulateMissingCommand
                     ->setParameter('l', $locale)
                     ->setMaxResults(1)
                     ->getQuery()->getOneOrNullResult();
-
-                if ($exists) {
-                    continue;
-                }
+                if ($exists) continue;
 
                 if (!$dryRun) {
-                    $tr = new $trClass();
-                    // public props / property hooks:
-                    $tr->hash = $str->hash;
-                    $tr->locale = $locale;
-                    $tr->text = '';
-                    if (property_exists($tr, 'status')) {
-                        $tr->status = 'untranslated';
-                    }
-                    if (property_exists($tr, 'updatedAt')) {
-                        $tr->updatedAt = new \DateTimeImmutable();
-                    }
+                    $tr = new $trClass($str->hash, $locale, null);
+                    // this happens in the constructor
+//                    $tr->updatedAt = new \DateTimeImmutable();
                     $this->em->persist($tr);
                 }
 
@@ -108,15 +93,13 @@ final class PopulateMissingCommand
 
                 if (!$dryRun && ($created % $batchSize) === 0) {
                     $this->em->flush();
-                    $this->em->clear();            // ORM 3: clear everything
-                    // IMPORTANT: re-acquire repositories after clear()
+                    $this->em->clear();
+                    // re-acquire after clear
                     $strRepo = $this->em->getRepository($strClass);
                     $trRepo  = $this->em->getRepository($trClass);
                 }
 
-                if ($limit > 0 && $seen >= $limit) {
-                    break;
-                }
+                if ($limit > 0 && $seen >= $limit) break;
             }
 
             if (!$dryRun) {
@@ -125,12 +108,11 @@ final class PopulateMissingCommand
             }
 
             $grandCreated += $created;
-            $io->success(sprintf('Locale %s: created %d missing StrTranslation row(s).', $locale, $created));
+            $io->success(sprintf('Locale %s: created %d StrTranslation row(s).', $locale, $created));
         }
 
         $io->success(sprintf('Total created: %d', $grandCreated));
         if ($dryRun) $io->note('Dry-run: no changes were written.');
-
         return 0;
     }
 
@@ -141,7 +123,6 @@ final class PopulateMissingCommand
             $targets = array_values(array_filter(array_map('trim', explode(',', $localesArg))));
             return $targets !== [] ? $targets : null;
         }
-
         if ($all) {
             $locales = $this->enabledLocales ?: [$this->defaultLocale];
             if ($locales === []) {
@@ -150,7 +131,6 @@ final class PopulateMissingCommand
             }
             return array_values(array_unique($locales));
         }
-
         $io->warning('Specify locales (e.g. "es,fr") or pass --all to use framework.enabled_locales.');
         return null;
     }

@@ -8,9 +8,9 @@ use Survos\BabelBundle\Command\BabelBrowseCommand;
 use Survos\BabelBundle\Command\BabelDebugSchemaCommand;
 use Survos\BabelBundle\Command\BabelTranslatableDumpCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
-use Survos\BabelBundle\Command\PopulateMissingCommand;
 use Survos\BabelBundle\Command\TranslatableIndexCommand;
 use Survos\BabelBundle\Command\TranslateCommand;
+use Survos\BabelBundle\Command\TranslationsEnsureCommand;
 use Survos\BabelBundle\Contract\TranslatorInterface;
 use Survos\BabelBundle\Service\CarrierRegistry;
 use Survos\BabelBundle\Service\Engine\CodeStorage;
@@ -88,7 +88,7 @@ return static function (ContainerConfigurator $c): void {
             ->tag('console.command');
 
     }
-    $s->set(PopulateMissingCommand::class)
+    $s->set(TranslationsEnsureCommand::class)
         ->autoconfigure()
 //        ->arg('$registry', service('doctrine'))
 //        ->arg('$router', service(StringStorageRouter::class))
