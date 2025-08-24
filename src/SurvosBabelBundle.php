@@ -8,6 +8,8 @@ use Survos\BabelBundle\DependencyInjection\Compiler\BabelCarrierScanPass;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelTraitAwareScanPass;
 use Survos\BabelBundle\EventListener\BabelPostLoadHydrator;
 use Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber;
+use Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber;
+use Survos\CodeBundle\Service\DirectEntityTranslatableUpdater;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -23,10 +25,13 @@ final class SurvosBabelBundle extends AbstractBundle
     {
         $container->import(\dirname(__DIR__).'/config/services.php');
 
-        $builder->register(\Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber::class)
-            ->setAutowired(true)
-            ->setAutoconfigured(true)
-            ->setPublic(false);
+        foreach ([BabelLocaleRequestSubscriber::class] as $class) {
+            $builder->register($class)
+                ->setAutowired(true)
+                ->setAutoconfigured(true)
+                ->setPublic(true);
+
+        }
 
 
         $builder->getDefinition(\Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber::class)
@@ -51,6 +56,7 @@ final class SurvosBabelBundle extends AbstractBundle
         if (!$builder->hasParameter('kernel.enabled_locales')) {
             $builder->setParameter('kernel.enabled_locales', []); // or ['en']
         }
+
 
         $builder->register(StringBackedTranslatableFlushSubscriber::class)
             ->setAutowired(true)
