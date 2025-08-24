@@ -42,11 +42,6 @@ return static function (ContainerConfigurator $c): void {
     $s->load('Survos\\BabelBundle\\EventListener\\', __DIR__ . '/../src/EventListener/');
     $s->load('Survos\\BabelBundle\\EventSubscriber\\', __DIR__ . '/../src/EventSubscriber/'); // if any
 
-    if (class_exists(\Survos\LibreTranslateBundle\Service\TranslationClientService::class)) {
-        // Translator abstraction -> concrete (LibreTranslate adapter in prod)
-        $s->alias(TranslatorInterface::class, TranslationClientService::class)->public();
-    }
-
 
     // Engines
     $s->set(CodeStorage::class)
@@ -54,13 +49,10 @@ return static function (ContainerConfigurator $c): void {
         ->arg('$registry', service('doctrine'))
     ;
 
-    $s->set(PropertyStorage::class)
-        ->arg('$translator', service(TranslatorInterface::class));
-
     // Router: EXPLICIT constructor args so we never rely on interface autowiring
     $s->set(StringStorageRouter::class)
-        ->arg('$codeEngine', service(CodeStorage::class))
-        ->arg('$propertyEngine', service(PropertyStorage::class))
+        ->arg('$code', service(CodeStorage::class))
+        ->arg('$property', service(PropertyStorage::class))
         ->public();
 
     // Other services

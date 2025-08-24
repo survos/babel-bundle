@@ -3,66 +3,132 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service\Engine;
 
+use Doctrine\DBAL\Connection;
 use Doctrine\Persistence\ManagerRegistry;
-use Survos\BabelBundle\Attribute\BabelStorage;
-use Survos\BabelBundle\Attribute\StorageMode;
-use Survos\BabelBundle\Contract\TranslatorInterface;
-use Survos\BabelBundle\Repository\StrRepository;
-use Survos\BabelBundle\Repository\StrTranslationRepository;
+use Survos\BabelBundle\Contracts\CodeStringCarrier;
 
+/**
+ * Code-mode storage: carriers expose a stable code → original map.
+ * Creates source rows in `str` and source `str_translation`,
+ * and inserts placeholder rows for other enabled locales (text='').
+ */
 final class CodeStorage implements StringStorage
 {
+    /**
+     * @param array<int,string> $enabledLocales Typically %kernel.enabled_locales%
+     */
     public function __construct(
-        private ManagerRegistry $registry,
-        private TranslatorInterface $translator,
+        private readonly ManagerRegistry $registry,
+        private readonly array $enabledLocales = [],
     ) {}
 
     public function populate(object $carrier, ?string $emName = null): int
     {
-        $attr = (new \ReflectionClass($carrier))->getAttributes(BabelStorage::class)[0] ?? null;
-        if ($attr && $attr->newInstance()->mode !== StorageMode::Code) return 0;
-        if (!\method_exists($carrier, 'getStringCodeMap') || !\method_exists($carrier, 'getOriginalFor')) return 0;
-
-        $map = $carrier->getStringCodeMap();   // field => code
-        $src = $carrier->getSourceLocale() ?? 'en';
-
-        $items = [];
-        foreach ($map as $field => $code) {
-            $original = $carrier->getOriginalFor($field);
-            if (!\is_string($original) || $original === '') continue;
-            $items[] = [$code, $original, $src];
+        if (!$carrier instanceof CodeStringCarrier) {
+            return 0;
         }
-        if (!$items) return 0;
 
-        $em = $this->registry->getManager($emName);
-        /** @var StrRepository $repo */
-        $repo = $em->getRepository(Str::class);
-
-        return $repo->upsertMany($items);
-    }
-
-    public function translate(object $carrier, string $locale, bool $onlyMissing = true, ?string $emName = null): int
-    {
-        if (!\method_exists($carrier, 'getStringCodeMap')) return 0;
-
-        $em    = $this->registry->getManager($emName);
-        /** @var StrRepository $sRepo */
-        $sRepo = $em->getRepository(Str::class);
-        /** @var StrTranslationRepository $tRepo */
-        $tRepo = $em->getRepository(\Survos\BabelBundle\Entity\StrTranslation::class);
+        $conn = $this->conn($emName);
+        $src  = \method_exists($carrier, 'getSourceLocale') && \is_string($carrier->getSourceLocale())
+            ? $carrier->getSourceLocale()
+            : 'en';
 
         $n = 0;
         foreach ($carrier->getStringCodeMap() as $field => $code) {
-            /** @var \Survos\BabelBundle\Entity\Str|null $str */
-            $str = $sRepo->find($code);
-            if (!$str) continue;
-            $t = $str->t;
-            if ($onlyMissing && isset($t[$locale]) && $t[$locale] !== '') continue;
+            $original = $carrier->getOriginalFor($field);
+            if (!\is_string($original) || $original === '') {
+                continue;
+            }
 
-            $text = $this->translator->translate($str->original, $str->srcLocale, $locale);
-            $tRepo->upsertTranslation($code, $locale, $text, false);
+            $this->upsertStr($conn, $code, $original, $src);
+            $this->upsertTrSource($conn, $code, $src, $original);
+
+            // Placeholders so babel:translate can find blanks
+            foreach ($this->enabledLocales as $loc) {
+                if (!\is_string($loc) || $loc === '' || $loc === $src) {
+                    continue;
+                }
+                $this->ensureTrPlaceholder($conn, $code, $loc);
+            }
+
             $n++;
         }
+
         return $n;
+    }
+
+    /* ---------------------------- helpers ---------------------------- */
+
+    private function conn(?string $emName): Connection
+    {
+        $em = $this->registry->getManager($emName);
+        return $em->getConnection();
+    }
+
+    private function upsertStr(Connection $conn, string $hash, string $original, string $src): void
+    {
+        $now = 'CURRENT_TIMESTAMP';
+
+        $sqlUpdate = 'UPDATE str
+                      SET original = :original, src_locale = :src, updated_at = '.$now.'
+                      WHERE hash = :hash';
+        $updated = $conn->executeStatement($sqlUpdate, [
+            'original' => $original, 'src' => $src, 'hash' => $hash,
+        ]);
+
+        if ($updated > 0) return;
+
+        try {
+            $sqlInsert = 'INSERT INTO str (hash, original, src_locale, created_at, updated_at)
+                          VALUES (:hash, :original, :src, '.$now.', '.$now.')';
+            $conn->executeStatement($sqlInsert, [
+                'hash' => $hash, 'original' => $original, 'src' => $src,
+            ]);
+        } catch (\Throwable) {
+            // race-safe retry
+            $conn->executeStatement($sqlUpdate, [
+                'original' => $original, 'src' => $src, 'hash' => $hash,
+            ]);
+        }
+    }
+
+    private function upsertTrSource(Connection $conn, string $hash, string $srcLocale, string $text): void
+    {
+        $now = 'CURRENT_TIMESTAMP';
+
+        $sqlUpdate = 'UPDATE str_translation
+                      SET text = :text, updated_at = '.$now.'
+                      WHERE hash = :hash AND locale = :loc';
+        $updated = $conn->executeStatement($sqlUpdate, [
+            'text' => $text, 'hash' => $hash, 'loc' => $srcLocale,
+        ]);
+
+        if ($updated > 0) return;
+
+        try {
+            $sqlInsert = 'INSERT INTO str_translation (hash, locale, text, created_at, updated_at)
+                          VALUES (:hash, :loc, :text, '.$now.', '.$now.')';
+            $conn->executeStatement($sqlInsert, [
+                'hash' => $hash, 'loc' => $srcLocale, 'text' => $text,
+            ]);
+        } catch (\Throwable) {
+            $conn->executeStatement($sqlUpdate, [
+                'text' => $text, 'hash' => $hash, 'loc' => $srcLocale,
+            ]);
+        }
+    }
+
+    private function ensureTrPlaceholder(Connection $conn, string $hash, string $locale): void
+    {
+        $now = 'CURRENT_TIMESTAMP';
+        try {
+            $sqlInsert = 'INSERT INTO str_translation (hash, locale, text, created_at, updated_at)
+                          VALUES (:hash, :loc, :text, '.$now.', '.$now.')';
+            $conn->executeStatement($sqlInsert, [
+                'hash' => $hash, 'loc' => $locale, 'text' => '',
+            ]);
+        } catch (\Throwable) {
+            // already exists; noop
+        }
     }
 }

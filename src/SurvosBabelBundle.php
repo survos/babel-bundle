@@ -3,10 +3,11 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle;
 
-use Survos\BabelBundle\Adapter\TranslatorAdapter;
-use Survos\BabelBundle\Contract\TranslatorInterface;
+use Doctrine\ORM\Events;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelCarrierScanPass;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelTraitAwareScanPass;
+use Survos\BabelBundle\EventListener\BabelPostLoadHydrator;
+use Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -22,6 +23,15 @@ final class SurvosBabelBundle extends AbstractBundle
     {
         $container->import(\dirname(__DIR__).'/config/services.php');
 
+        $builder->register(\Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false);
+
+
+        $builder->getDefinition(\Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber::class)
+            ->setArgument('$enabledLocales', '%kernel.enabled_locales%');
+
         // Fallback namespaces the compiler passes can use if Doctrine mappings/params aren't available.
         if (!$builder->hasParameter('survos_babel.scan_namespaces')) {
             $builder->setParameter('survos_babel.scan_namespaces', [
@@ -30,42 +40,34 @@ final class SurvosBabelBundle extends AbstractBundle
             ]);
         }
 
+        // --- Explicitly register Doctrine listeners (don’t rely on attributes/autodiscovery) ---
+        $builder->register(BabelPostLoadHydrator::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false)
+            ->addTag('doctrine.event_listener', ['event' => Events::postLoad]);
+
+        // ensure a safe fallback if the framework param isn't defined
+        if (!$builder->hasParameter('kernel.enabled_locales')) {
+            $builder->setParameter('kernel.enabled_locales', []); // or ['en']
+        }
+
+        $builder->register(StringBackedTranslatableFlushSubscriber::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false)
+            ->setArgument('$enabledLocales', '%kernel.enabled_locales%')
+            ->addTag('doctrine.event_listener', ['event' => Events::prePersist])
+            ->addTag('doctrine.event_listener', ['event' => Events::preUpdate])
+            ->addTag('doctrine.event_listener', ['event' => Events::onFlush])
+            ->addTag('doctrine.event_listener', ['event' => Events::postFlush]);
+
+        // Optional, but keep: soft engine bridge
         $builder->register(ExternalTranslatorBridge::class)
             ->setAutowired(false)
             ->setAutoconfigured(false)
             ->setPublic(true)
             ->setArgument('$manager', new Reference('Survos\TranslatorBundle\Service\TranslatorManager', ContainerInterface::NULL_ON_INVALID_REFERENCE));
-
-        $builder->register(TranslatorAdapter::class)
-            ->setAutowired(false)
-            ->setAutoconfigured(false)
-            ->setPublic(true)
-            ->setArgument('$manager', new Reference('Survos\TranslatorBundle\Service\TranslatorManager', ContainerInterface::NULL_ON_INVALID_REFERENCE));
-
-        $builder->setAlias(TranslatorInterface::class, TranslatorAdapter::class)->setPublic(false);
-    }
-
-    public function xxloadExtension(array $config, ContainerConfigurator $container, ContainerBuilder $builder): void
-    {
-        $container->import(\dirname(__DIR__).'/config/services.php');
-
-        $builder->register(ExternalTranslatorBridge::class)
-            ->setAutowired(false)
-            ->setAutoconfigured(false)
-            ->setPublic(true)
-            // Soft reference to Survos\TranslatorBundle\Service\TranslatorManager
-            ->setArgument('$manager', new Reference('Survos\TranslatorBundle\Service\TranslatorManager', ContainerInterface::NULL_ON_INVALID_REFERENCE));
-
-        // register the adapter
-        $builder->register(TranslatorAdapter::class)
-            ->setAutowired(false)
-            ->setAutoconfigured(false)
-            ->setPublic(true)
-            // Soft reference to TranslatorManager (null if bundle not installed)
-            ->setArgument('$manager', new Reference('Survos\TranslatorBundle\Service\TranslatorManager', ContainerInterface::NULL_ON_INVALID_REFERENCE));
-
-// alias the interface to the concrete adapter
-        $builder->setAlias(TranslatorInterface::class, TranslatorAdapter::class)->setPublic(false);
 
     }
 

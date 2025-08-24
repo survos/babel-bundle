@@ -59,6 +59,7 @@ final class BabelPostLoadHydrator
             ? $entity->srcLocale
             : $default;
 
+//        dd($current, $default, $srcLocale);
         // Compute hashes for all fields from raw/backing values
         $fieldToHash = [];
         foreach ($fields as $field) {

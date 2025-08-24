@@ -2,9 +2,9 @@
 
 namespace Survos\BabelBundle\Service;
 
-use Symfony\Contracts\Translation\TranslatorInterface;
+// move to survos/translator-bundle
 
-class FakeTranslatorService implements TranslatorInterface
+class FakeTranslatorService
 {
     private array $spanishCommonWords = [
         // Pronouns

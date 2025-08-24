@@ -42,8 +42,6 @@ trait TranslatableHooksTrait
         $codes = (array)($this->tCodes ?? []);
         $hash  = $codes[$field] ?? BabelRuntime::hash($backingValue, $fallback, $context);
         $text  = BabelRuntime::lookup($hash, $locale) ?? $backingValue;
-        dd($text);
-
         return $this->_resolved[$field] = $text;
     }
 

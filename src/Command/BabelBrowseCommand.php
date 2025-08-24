@@ -72,7 +72,6 @@ final class BabelBrowseCommand
         // Build output
         $out = [];
         foreach ($rows as $row) {
-            dd($row->description);
             // PK string
             $ids = $meta->getIdentifierValues($row);
             $id = (count($ids) === 1) ? (string)array_values($ids)[0] : implode(':', array_map('strval', array_values($ids)));

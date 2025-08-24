@@ -3,8 +3,6 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Runtime;
 
-use Survos\BabelBundle\Contract\TranslatorInterface;
-
 /**
  * Process/request-scoped translation runtime used by property hooks.
  *
@@ -17,7 +15,6 @@ use Survos\BabelBundle\Contract\TranslatorInterface;
  */
 final class BabelRuntime
 {
-    private static ?TranslatorInterface $translator = null;
     private static ?string $locale = null;
     private static string $fallback = 'en';
 
@@ -26,18 +23,13 @@ final class BabelRuntime
 
     // ---- init / setters -----------------------------------------------------
 
-    public static function init(TranslatorInterface $translator, ?string $locale, string $fallback = 'en', ?callable $hashFn = null): void
+    public static function init(?string $locale, string $fallback = 'en', ?callable $hashFn = null): void
     {
-        self::$translator = $translator;
         self::$locale     = $locale;
         self::$fallback   = $fallback;
         self::$hashFn     = $hashFn;
     }
 
-    public static function setTranslator(TranslatorInterface $translator): void
-    {
-        self::$translator = $translator;
-    }
 
     public static function setLocale(?string $locale): void
     {
@@ -85,18 +77,11 @@ final class BabelRuntime
     /**
      * Translator-agnostic lookup: we try a few common method names on your TranslatorInterface impl.
      */
+// src/Runtime/BabelRuntime.php
     public static function lookup(string $hash, string $locale): ?string
     {
-        if (!self::$translator) {
-            return null; // not initialized; hooks will return source text
-        }
-        $t = self::$translator;
-
-        if (\method_exists($t, 'get'))        { return $t->get($hash, $locale); }
-        if (\method_exists($t, 'translate'))  { return $t->translate($hash, $locale); }
-        if (\method_exists($t, 'lookup'))     { return $t->lookup($hash, $locale); }
-        if (\method_exists($t, 'text'))       { return $t->text($hash, $locale); }
-
+        // No runtime engine calls here. Hydration will set resolved values;
+        // returning null makes the property hook fall back to the backing text.
         return null;
     }
 }

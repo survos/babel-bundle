@@ -5,12 +5,10 @@ namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
-use Survos\BabelBundle\Contract\TranslatorInterface as TextTranslatorInterface;
 use Survos\BabelBundle\Entity\Base\StrBase;
 use Survos\BabelBundle\Entity\Base\StrTranslationBase;
 use Survos\BabelBundle\Event\TranslateStringEvent;
 use Survos\BabelBundle\Service\ExternalTranslatorBridge;
-use Survos\BabelBundle\Service\FakeTranslatorService;
 use Survos\BabelBundle\Service\LocaleContext;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -19,18 +17,16 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
-use Symfony\Contracts\Translation\TranslatorInterface;
 
-#[AsCommand('babel:translate', 'Translate blank StrTranslation rows for target locale(s) (event-first, optional provider fallback)')]
+#[AsCommand('babel:translate', 'Translate blank StrTranslation rows for target locale(s) (event-first, optional TranslatorBundle fallback)')]
 final class TranslateCommand
 {
     public function __construct(
-        private readonly EntityManagerInterface $em,
-        private readonly LoggerInterface $logger,
-        private readonly LocaleContext $localeContext,
+        private readonly EntityManagerInterface   $em,
+        private readonly LoggerInterface          $logger,
+        private readonly LocaleContext            $localeContext,
         private readonly EventDispatcherInterface $dispatcher,
-        private readonly ?ExternalTranslatorBridge $bridge = null,
-        private readonly ?TextTranslatorInterface $textProvider = null, // optional default provider
+        private readonly ?ExternalTranslatorBridge $bridge = null, // soft dep; may be null
     ) {}
 
     public function __invoke(
@@ -40,33 +36,44 @@ final class TranslateCommand
         #[Option('Use all framework.enabled_locales when locales argument is empty')] bool $all = false,
         #[Option('Limit number to translate per locale (0 = unlimited)')] int $limit = 0,
         #[Option('Dry-run: do not write')] bool $dryRun = false,
-        #[Option('Engine short name: libre|dummy|fake (overridden by --engine-class)')] ?string $engine = null,
-        #[Option('Engine FQCN implementing Survos\BabelBundle\Contract\TextTranslatorInterface')] ?string $engineClass = null,
-        #[Option('Str entity FQCN (must extend StrBase)')] string $strClass = 'App\\Entity\\Str',
-        #[Option('StrTranslation entity FQCN (must extend StrTranslationBase)')] string $trClass  = 'App\\Entity\\StrTranslation',
+        #[Option('Engine name (TranslatorBundle). If omitted and bundle is present, uses default engine.')] ?string $engine = null,
+        #[Option('Str entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrBase)')] string $strClass = 'App\\Entity\\Str',
+        #[Option('StrTranslation entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrTranslationBase)')] string $trClass  = 'App\\Entity\\StrTranslation',
         #[Option('Override *source* locale when Str.srcLocale is null')] ?string $srcLocaleOverride = null,
     ): int {
-        // Allow per-run source-locale override
+        // Optional global source-locale override for this run
         if ($srcLocaleOverride) {
             $this->localeContext->set($srcLocaleOverride);
         }
 
         // Resolve target locales
         $targets = $this->resolveTargetLocales($io, $localesArg, $all);
-        if ($targets === null) return 1;
+        if ($targets === null) {
+            return Command::FAILURE;
+        }
 
-        // Resolve provider (optional fallback after event)
-        $provider = $this->resolveProvider($io, $engine, $engineClass);
+        // If the user explicitly asked for an engine but the bridge is unavailable, fail early
+        if ($engine !== null && (!$this->bridge || !$this->bridge->isAvailable())) {
+            $io->error(implode("\n", [
+                'The --engine option requires SurvosTranslatorBundle.',
+                'Install it first:',
+                '  composer require survos/translator-bundle',
+            ]));
+            return Command::FAILURE;
+        }
 
-        // Entity checks (inheritance)
+        // Entity checks
         if (!class_exists($strClass) || !class_exists($trClass)) {
-            $io->error('Str/StrTranslation classes not found.'); return 1;
+            $io->error('Str/StrTranslation classes not found.');
+            return Command::FAILURE;
         }
         if (!is_a($strClass, StrBase::class, true)) {
-            $io->error(sprintf('Str class must extend %s.', StrBase::class)); return 1;
+            $io->error(sprintf('Str class must extend %s.', StrBase::class));
+            return Command::FAILURE;
         }
         if (!is_a($trClass, StrTranslationBase::class, true)) {
-            $io->error(sprintf('StrTranslation class must extend %s.', StrTranslationBase::class)); return 1;
+            $io->error(sprintf('StrTranslation class must extend %s.', StrTranslationBase::class));
+            return Command::FAILURE;
         }
 
         $strRepo = $this->em->getRepository($strClass);
@@ -82,7 +89,9 @@ final class TranslateCommand
                 ->andWhere('t.locale = :loc')->setParameter('loc', $targetLocale)
                 ->andWhere('(t.text IS NULL OR t.text = \'\')')
                 ->orderBy('t.hash', 'ASC');
-            if ($limit > 0) $qb->setMaxResults($limit);
+            if ($limit > 0) {
+                $qb->setMaxResults($limit);
+            }
 
             $iter = $qb->getQuery()->toIterable();
             $done = 0;
@@ -94,15 +103,18 @@ final class TranslateCommand
                 /** @var StrBase|null $str */
                 $str = $strRepo->find($hash);
                 if (!$str) {
-                    dd($hash, $str, $tr);
-                    continue;
-                }
-                // @todo: remove this or handle better
-                if ($str->srcLocale  === $tr->locale) {
+                    $this->logger->warning('Missing Str for StrTranslation hash; skipping.', ['hash' => $hash, 'locale' => $targetLocale]);
+                    $done++;
                     continue;
                 }
 
-                $original  = $str->original;
+                // Skip same-locale “translation”
+                if ($str->srcLocale === $tr->locale) {
+                    $done++;
+                    continue;
+                }
+
+                $original  = (string) $str->original;
                 $srcLocale = $str->srcLocale ?: $this->localeContext->getDefault();
 
                 // 1) EVENT FIRST: let listeners provide a translation
@@ -116,21 +128,14 @@ final class TranslateCommand
                 $this->dispatcher->dispatch($evt);
                 $translated = $evt->translated;
 
-                // 2) FALLBACK PROVIDER (optional)
-                if (($translated === null || $translated === '') && $provider) {
-                    if ($engine !== null && !$this->bridge->isAvailable()) {
-                        $io->error(implode("\n", [
-                            'The --engine option requires SurvosTranslatorBundle.',
-                            'Install it first:',
-                            '  composer require survos/translator-bundle',
-                        ]));
-                        return Command::FAILURE;
-                    }
+                // 2) FALLBACK: TranslatorBundle (if present). If no --engine passed, use default engine.
+                if (($translated === null || $translated === '') && $this->bridge && $this->bridge->isAvailable()) {
                     try {
-                        $translated = $provider->translate($original, $srcLocale, $targetLocale);
+                        $result     = $this->bridge->translate($original, $srcLocale, $targetLocale, $engine);
+                        $translated = (string) ($result['translatedText'] ?? '');
                     } catch (\Throwable $e) {
-                        $this->logger->warning('Provider translate failed', [
-                            'hash'=>$hash,'src'=>$srcLocale,'dst'=>$targetLocale,'err'=>$e->getMessage(),
+                        $this->logger->warning('TranslatorBundle fallback failed', [
+                            'hash' => $hash, 'src' => $srcLocale, 'dst' => $targetLocale, 'err' => $e->getMessage(),
                         ]);
                         $translated = null;
                     }
@@ -138,13 +143,13 @@ final class TranslateCommand
 
                 // Nothing to write?
                 if ($translated === null || $translated === '') {
-                    $done++; // still counted as processed
+                    $done++;
                     continue;
                 }
 
                 if (!$dryRun) {
-                    // public props; property hooks are fine
-                    $tr->text      = $translated;
+                    // public props; if your entity has updatedAt, touch it
+                    $tr->text = $translated;
                     if (\property_exists($tr, 'updatedAt')) {
                         $tr->updatedAt = new \DateTimeImmutable();
                     }
@@ -155,7 +160,7 @@ final class TranslateCommand
 
                 if (!$dryRun && ($done % 200) === 0) {
                     $this->em->flush();
-                    $this->em->clear(); // ORM 3: clear all
+                    $this->em->clear();
                     $strRepo = $this->em->getRepository($strClass);
                     $trRepo  = $this->em->getRepository($trClass);
                 }
@@ -168,12 +173,15 @@ final class TranslateCommand
                 $trRepo  = $this->em->getRepository($trClass);
             }
 
-            $io->success(sprintf('Locale %s: translated %d row(s).', $targetLocale, $done));
+            $io->success(sprintf('Locale %s: processed %d row(s).', $targetLocale, $done));
         }
 
         $io->success(sprintf('Total translations written: %d', $grandTotal));
-        if ($dryRun) $io->note('Dry-run: no changes were written.');
-        return 0;
+        if ($dryRun) {
+            $io->note('Dry-run: no changes were written.');
+        }
+
+        return Command::SUCCESS;
     }
 
     /** @return list<string>|null */
@@ -185,55 +193,13 @@ final class TranslateCommand
         }
         if ($all) {
             $locales = $this->localeContext->getEnabled() ?: [$this->localeContext->getDefault()];
-            if ($locales === []) { $io->warning('No enabled locales found.'); return null; }
+            if ($locales === []) {
+                $io->warning('No enabled locales found.');
+                return null;
+            }
             return array_values(array_unique($locales));
         }
         $io->warning('Specify locales (e.g. "es,fr") or pass --all.');
         return null;
-    }
-
-    private function resolveProvider(SymfonyStyle $io, ?string $engine, ?string $engineClass): ?TextTranslatorInterface
-    {
-        // explicit class wins
-        if ($engineClass) {
-            if (!class_exists($engineClass)) {
-                $io->error("Engine class {$engineClass} not found."); return null;
-            }
-            $instance = new $engineClass();
-            return $instance instanceof TextTranslatorInterface ? $instance : null;
-        }
-
-        if ($engine) {
-            $engine = strtolower($engine);
-            if ($engine === 'fake') {
-                // Wrap FakeTranslatorService (Symfony\Contracts\Translation\TranslatorInterface) into TextTranslatorInterface
-                if (!class_exists(FakeTranslatorService::class)) {
-                    $io->error('Fake translator not available in this build.'); return null;
-                }
-                $symfonyTranslator = new FakeTranslatorService();
-                return new class($symfonyTranslator) implements TextTranslatorInterface {
-                    public function __construct(private TranslatorInterface $t) {}
-                    public function translate(string $text, string $fromLocale, string $toLocale): string
-                    {
-                        // Delegate via Symfony TranslatorInterface (“id = text” is fine for fake)
-                        return $this->t->trans($text, [], null, $toLocale);
-                    }
-                };
-            }
-
-            $map = [
-                'dummy' => \Survos\BabelBundle\Translator\DummyTranslator::class,
-                'libre' => \Survos\BabelBundle\Translator\LibreTranslateClient::class,
-            ];
-            $class = $map[$engine] ?? null;
-            if (!$class || !class_exists($class)) {
-                $io->error(sprintf('Unknown/missing engine "%s". Try --engine=fake|libre or use --engine-class=FQCN.', $engine));
-                return null;
-            }
-            $instance = new $class();
-            return $instance instanceof TextTranslatorInterface ? $instance : null;
-        }
-
-        return $this->textProvider;
     }
 }
