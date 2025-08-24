@@ -50,8 +50,9 @@ return static function (ContainerConfigurator $c): void {
 
     // Engines
     $s->set(CodeStorage::class)
+        ->autowire(true)
         ->arg('$registry', service('doctrine'))
-        ->arg('$translator', service(TranslatorInterface::class));
+    ;
 
     $s->set(PropertyStorage::class)
         ->arg('$translator', service(TranslatorInterface::class));
