@@ -18,7 +18,10 @@ use Survos\BabelBundle\Util\BabelHasher;
  *  - getBackingValue(string $field): mixed
  *  - setResolvedTranslation(string $field, string $text): void
  *
- * Legacy paths like writing to $_i18n are NOT supported anymore (we throw).
+ * Strategy:
+ *  1) Compute per-field hashes based on source-locale + context + original backing value
+ *  2) Fetch ONLY the current request locale's translations for those hashes
+ *  3) Write them via setResolvedTranslation($field, $text)
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
@@ -35,13 +38,14 @@ final class BabelPostLoadHydrator
         $entity = $args->getObject();
         $class  = $entity::class;
 
+        // What fields should we hydrate?
         $fields = $this->index->fieldsFor($class);
         if ($fields === []) {
-            $this->logger?->debug('BabelPostLoadHydrator: no translatable fields.', ['class' => $class]);
+            // nothing to do for this class
             return;
         }
 
-        // Enforce hooks API (no legacy fallback)
+        // Enforce hooks API (no legacy _i18n / no reflection)
         if (!\method_exists($entity, 'getBackingValue') || !\method_exists($entity, 'setResolvedTranslation')) {
             throw new \LogicException(sprintf(
                 'Entity %s must use TranslatableHooksTrait (getBackingValue/setResolvedTranslation) for hydration.',
@@ -52,15 +56,10 @@ final class BabelPostLoadHydrator
         $cfg      = $this->index->configFor($class);
         $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
 
-        // Source locale used for hashing on write; prefer entity->srcLocale if present
-        $current   = $this->locale->get();
-        $default   = \method_exists($this->locale, 'getDefault') ? (string)$this->locale->getDefault() : $current;
-        $srcLocale = (\property_exists($entity, 'srcLocale') && \is_string($entity->srcLocale) && $entity->srcLocale !== '')
-            ? $entity->srcLocale
-            : $default;
+        // Source-locale for hashing; prefer #[BabelLocale] (recorded as localeProp) else bundle default
+        $srcLocale = $this->resolveSourceLocale($entity, $class);
 
-//        dd($current, $default, $srcLocale);
-        // Compute hashes for all fields from raw/backing values
+        // Build hash per field from backing (avoid reading the public hook to prevent recursion)
         $fieldToHash = [];
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
@@ -68,26 +67,32 @@ final class BabelPostLoadHydrator
                 continue;
             }
             $context = $fieldCfg[$field]['context'] ?? null;
-            $fieldToHash[$field] = BabelHasher::forString($srcLocale, $context, $original);
+            $hash    = BabelHasher::forString($srcLocale, $context, $original);
+            $fieldToHash[$field] = $hash;
         }
 
         if ($fieldToHash === []) {
-            $this->logger?->debug('BabelPostLoadHydrator: no originals to hash.', ['class' => $class]);
+            $this->logger?->debug('BabelPostLoadHydrator: no originals to hash', ['class' => $class]);
             return;
         }
 
-        // Fetch only the current target locale
+        // Fetch translations only for the current target locale
+        $targetLocale = $this->locale->get();
+
         $conn = $em->getConnection();
-        $qb = $conn->createQueryBuilder();
+        $qb   = $conn->createQueryBuilder();
         $qb->select('hash', 'text')
             ->from('str_translation')
             ->where($qb->expr()->in('hash', ':hashes'))
             ->andWhere('locale = :loc')
             ->setParameter('hashes', array_values($fieldToHash), ArrayParameterType::STRING)
-            ->setParameter('loc', $current);
+            ->setParameter('loc', $targetLocale);
+//        $query = $qb->getSQL(); dd($qb->getSQL(), $targetLocale);
 
         $rows = $qb->executeQuery()->fetchAllAssociative();
+        foreach ($rows as $row) { dump($row); }
 
+        // Build hash => text map (skip nulls)
         $map = [];
         foreach ($rows as $r) {
             $h = (string)($r['hash'] ?? '');
@@ -97,6 +102,7 @@ final class BabelPostLoadHydrator
             }
         }
 
+        // Apply via hooks
         $applied = 0;
         foreach ($fieldToHash as $field => $hash) {
             $text = $map[$hash] ?? null;
@@ -107,11 +113,49 @@ final class BabelPostLoadHydrator
             $applied++;
         }
 
+
         $this->logger?->debug('BabelPostLoadHydrator: hydrated', [
             'class'   => $class,
+            'locale'  => $targetLocale,
             'applied' => $applied,
-            'locale'  => $current,
             'fields'  => array_keys($fieldToHash),
         ]);
+    }
+
+    /**
+     * Resolve source-locale used for hashing:
+     * - prefers TranslatableIndex::configFor($class)['localeProp'] (from #[BabelLocale])
+     * - tries a conventional getter first, then a public property
+     * - falls back to bundle default (not the request/UI locale)
+     */
+    private function resolveSourceLocale(object $entity, string $class): string
+    {
+        $current = $this->locale->get();
+        $default = \method_exists($this->locale, 'getDefault') ? (string)$this->locale->getDefault() : $current;
+
+        $cfg  = $this->index->configFor($class);
+        $prop = \is_string($cfg['localeProp'] ?? null) ? $cfg['localeProp'] : null;
+
+        if ($prop !== null && $prop !== '') {
+            $getter = 'get' . \ucfirst($prop);
+            if (\method_exists($entity, $getter)) {
+                try {
+                    $val = $entity->$getter();
+                    if (\is_string($val) && $val !== '') {
+                        return $val;
+                    }
+                } catch (\Throwable) {
+                    // ignore and fall through
+                }
+            }
+            if (\property_exists($entity, $prop)) {
+                $val = $entity->$prop ?? null;
+                if (\is_string($val) && $val !== '') {
+                    return $val;
+                }
+            }
+        }
+
+        return $default;
     }
 }
