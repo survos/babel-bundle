@@ -11,10 +11,10 @@ use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Command\TranslatableIndexCommand;
 use Survos\BabelBundle\Command\TranslateCommand;
 use Survos\BabelBundle\Command\TranslationsEnsureCommand;
-use Survos\BabelBundle\Contract\TranslatorInterface;
 use Survos\BabelBundle\Service\CarrierRegistry;
 use Survos\BabelBundle\Service\Engine\CodeStorage;
 use Survos\BabelBundle\Service\Engine\PropertyStorage;
+use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\Scanner\TranslatableScanner;
 use Survos\BabelBundle\Service\StringResolver;
 use Survos\BabelBundle\Service\StringStorageRouter;
@@ -48,6 +48,14 @@ return static function (ContainerConfigurator $c): void {
         ->autowire(true)
         ->arg('$registry', service('doctrine'))
     ;
+
+    $s->set(LocaleContext::class)
+        ->autowire(true)
+        ->autoconfigure(true)
+        ->public()
+        ->arg('$requests', service('request_stack'))
+    ;
+
 
     // Router: EXPLICIT constructor args so we never rely on interface autowiring
     $s->set(StringStorageRouter::class)

@@ -34,8 +34,6 @@ final class SurvosBabelBundle extends AbstractBundle
         }
 
 
-        $builder->getDefinition(\Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber::class)
-            ->setArgument('$enabledLocales', '%kernel.enabled_locales%');
 
         // Fallback namespaces the compiler passes can use if Doctrine mappings/params aren't available.
         if (!$builder->hasParameter('survos_babel.scan_namespaces')) {
@@ -62,9 +60,9 @@ final class SurvosBabelBundle extends AbstractBundle
             ->setAutowired(true)
             ->setAutoconfigured(true)
             ->setPublic(false)
-            ->setArgument('$enabledLocales', '%kernel.enabled_locales%')
-            ->addTag('doctrine.event_listener', ['event' => Events::prePersist])
-            ->addTag('doctrine.event_listener', ['event' => Events::preUpdate])
+//            ->setArgument('$enabledLocales', '%kernel.enabled_locales%')
+//            ->addTag('doctrine.event_listener', ['event' => Events::prePersist])
+//            ->addTag('doctrine.event_listener', ['event' => Events::preUpdate])
             ->addTag('doctrine.event_listener', ['event' => Events::onFlush])
             ->addTag('doctrine.event_listener', ['event' => Events::postFlush]);
 

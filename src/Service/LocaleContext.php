@@ -3,56 +3,94 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
 
-use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
-use Symfony\Component\Translation\LocaleSwitcher;
+use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Contracts\Translation\LocaleAwareInterface;
+use Symfony\Component\Translation\LocaleSwitcher;
+use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 
 final class LocaleContext
 {
-    private string $current;
     private string $default;
     /** @var string[] */
     private array $enabled;
-
+    private ?string $current = null; // ← lazy until first get()
     public function __construct(
         private ?LocaleAwareInterface $translator = null,
         private ?LocaleSwitcher $switcher = null,
-        ?ParameterBagInterface $params = null
+        private ?RequestStack $requests = null,
+        ?ParameterBagInterface $params = null,
     ) {
-        $this->default = $this->normalize((string) ($params?->get('kernel.default_locale') ?? 'en'));
+        $this->default = self::norm((string) ($params?->get('kernel.default_locale') ?? 'en'));
         $enabled = $params?->get('kernel.enabled_locales') ?? [];
-        $this->enabled = \is_array($enabled) ? array_values(array_map([$this, 'normalize'], $enabled)) : [];
-
-        $this->current = $this->default;
-        \Locale::setDefault($this->current);
-        $this->syncFramework($this->current);
+        $this->enabled = \is_array($enabled) ? array_values(array_map(self::norm(...), $enabled)) : [];
     }
 
-    public function get(): string { return $this->current; }
-    public function getDefault(): string { return $this->default; }
-    /** @return string[] */
-    public function getEnabled(): array { return $this->enabled; }
+    public function get(): string
+    {
+        // Lazy resolve once, then cache
+        if ($this->current === null) {
+            $this->current = $this->resolveFromRequest() ?? $this->default;
+            \Locale::setDefault($this->current);
+            $this->syncFramework($this->current);
+        }
+        return $this->current;
+    }
 
-    /** Set active locale; null => reset to default */
+    public function getDefault(): string { return $this->default; }
+    /** @return string[] */ public function getEnabled(): array { return $this->enabled; }
+
+    /** Force/override for this run (e.g. CLI or query option) */
     public function set(?string $locale = null): void
     {
-        $locale = $locale === null ? $this->default : $this->normalize($locale);
-        $this->assertSupported($locale);
-        $this->current = $locale;
-        \Locale::setDefault($locale);
-        $this->syncFramework($locale);
+        $loc = $locale ? self::norm($locale) : $this->default;
+        if ($this->enabled && !\in_array($loc, $this->enabled, true)) {
+            throw new \InvalidArgumentException("Unsupported locale {$loc}");
+        }
+        $this->current = $loc;
+        \Locale::setDefault($loc);
+        $this->syncFramework($loc);
     }
 
-    /** Temporarily switch locale during callback, restore afterwards */
-    public function run(?string $locale, callable $callback): mixed
+    private function resolveFromRequest(): ?string
     {
-        $prev = $this->get();
-        $this->set($locale);
-        try { return $callback(); }
-        finally { $this->set($prev); }
+        $r = $this->requests?->getCurrentRequest();
+        if (!$r) return null;
+
+        // priority: route _locale > request->getLocale() > Accept-Language
+        $candidates = [];
+        if ($r->attributes->has('_locale')) $candidates[] = (string)$r->attributes->get('_locale');
+        $candidates[] = $r->getLocale();
+        if ($al = $this->bestFromAcceptLanguage($r)) $candidates[] = $al;
+
+        foreach ($candidates as $cand) {
+            $cand = self::norm((string)$cand);
+            if ($cand && (!$this->enabled || \in_array($cand, $this->enabled, true))) {
+                return $cand;
+            }
+        }
+        return null;
     }
 
-    private function normalize(string $locale): string
+    private function bestFromAcceptLanguage(Request $r): ?string
+    {
+        $langs = $r->getLanguages(); // already sorted by q
+        foreach ($langs as $lang) {
+            $lang = self::norm($lang);
+            if (!$this->enabled || \in_array($lang, $this->enabled, true)) {
+                return $lang;
+            }
+        }
+        return null;
+    }
+
+    private function syncFramework(string $locale): void
+    {
+        if ($this->switcher)       { $this->switcher->setLocale($locale); }
+        elseif ($this->translator) { $this->translator->setLocale($locale); }
+    }
+
+    private static function norm(string $locale): string
     {
         $locale = \str_replace('_', '-', \trim($locale));
         if (\preg_match('/^([a-zA-Z]{2,3})(?:-([A-Za-z]{2}))?$/', $locale, $m)) {
@@ -61,25 +99,5 @@ final class LocaleContext
             return $lang.$reg;
         }
         return $locale;
-    }
-
-    private function assertSupported(string $locale): void
-    {
-        if ($this->enabled && !\in_array($locale, $this->enabled, true)) {
-            throw new \InvalidArgumentException(sprintf(
-                'Unsupported locale "%s". Allowed: %s',
-                $locale,
-                implode(', ', $this->enabled)
-            ));
-        }
-    }
-
-    private function syncFramework(string $locale): void
-    {
-        if ($this->switcher) {
-            $this->switcher->setLocale($locale);
-        } elseif ($this->translator) {
-            $this->translator->setLocale($locale);
-        }
     }
 }

@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\DependencyInjection\Compiler;
 
+use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
@@ -84,24 +85,17 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
     private function maybeIndexClass(array &$index, string $fqcn): void
     {
-        try {
-            $rc = new \ReflectionClass($fqcn);
-        } catch (\Throwable) {
-            return;
-        }
-        if ($rc->isAbstract() || $rc->isTrait()) {
-            return;
-        }
+        try { $rc = new \ReflectionClass($fqcn); } catch (\Throwable) { return; }
+        if ($rc->isAbstract() || $rc->isTrait()) return;
 
-        // Only consider classes explicitly tagged for property storage
-        $storageAttr = $rc->getAttributes(BabelStorage::class)[0] ?? null;
-        if (!$storageAttr || $storageAttr->newInstance()->mode !== StorageMode::Property) {
+        $storageAttr = $rc->getAttributes(\Survos\BabelBundle\Attribute\BabelStorage::class)[0] ?? null;
+        if (!$storageAttr || $storageAttr->newInstance()->mode !== \Survos\BabelBundle\Attribute\StorageMode::Property) {
             return;
         }
 
         $props = $this->collectPropsRecursive($rc);
 
-        // Fields with #[Translatable]
+        // Translatable fields
         $fields = [];
         foreach ($props as $entry) {
             $p = $entry['prop'];
@@ -111,40 +105,49 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             $fields[$p->getName()] = ['context' => $meta->name ?? null];
         }
 
-        // Locale prop (optional)
-        $localeProp = null;
+        // Locale accessor via #[BabelLocale] on property or method
+        $localeAccessor = null;
+
+        // properties first
         foreach ($props as $entry) {
-            $n = $entry['prop']->getName();
-            if ($n === 'srcLocale' || $n === 'sourceLocale') { $localeProp = $n; break; }
+            $p = $entry['prop'];
+            $attrs = $p->getAttributes(BabelLocale::class);
+            if ($attrs) {
+                $fmt = $attrs[0]->newInstance()->format ?? null;
+                $localeAccessor = ['type' => 'prop', 'name' => $p->getName(), 'format' => $fmt];
+                break;
+            }
         }
-
-        // Heuristic: needs hooks?
-        $usesHooksTrait =
-            $this->classUsesTraitRecursive($rc, 'Survos\\BabelBundle\\Traits\\BabelTranslatableAttrTrait') ||
-            $this->classUsesTraitRecursive($rc, 'Survos\\BabelBundle\\Traits\\BabelTranslatableTrait');
-
-        $allPropNames = [];
-        foreach ($props as $e) { $allPropNames[$e['prop']->getName()] = true; }
-
-        $needsHooks = false; $fieldsNeedingHooks = [];
-        foreach (\array_keys($fields) as $fname) {
-            $backing1 = $fname . '_raw';
-            $backing2 = $fname . 'Backing';
-            if (!isset($allPropNames[$backing1]) && !isset($allPropNames[$backing2]) && !$usesHooksTrait) {
-                $needsHooks = true; $fieldsNeedingHooks[] = $fname;
+        // methods next (on this class only; not traits)
+        if (!$localeAccessor) {
+            foreach ($rc->getMethods() as $m) {
+                $attrs = $m->getAttributes(BabelLocale::class);
+                if ($attrs) {
+                    $fmt = $attrs[0]->newInstance()->format ?? null;
+                    $localeAccessor = ['type' => 'method', 'name' => $m->getName(), 'format' => $fmt];
+                    break;
+                }
+            }
+        }
+        // fallback heuristic
+        if (!$localeAccessor) {
+            foreach (['srcLocale', 'sourceLocale'] as $n) {
+                if ($rc->hasProperty($n)) {
+                    $localeAccessor = ['type' => 'prop', 'name' => $n, 'format' => null];
+                    break;
+                }
             }
         }
 
-        if (!$fields && !$localeProp) return;
+        if (!$fields && !$localeAccessor) return;
 
         $index[$fqcn] = [
-            'fields'             => $fields,
-            'localeProp'         => $localeProp,
-            'hasTCodes'          => false,
-            'needsHooks'         => $needsHooks,
-            'fieldsNeedingHooks' => $fieldsNeedingHooks,
+            'fields'         => $fields,
+            'localeAccessor' => $localeAccessor,
+            'hasTCodes'      => false,
         ];
     }
+
 
     /** @return array<array{name:string, prop:\ReflectionProperty}> */
     private function collectPropsRecursive(\ReflectionClass $rc): array
