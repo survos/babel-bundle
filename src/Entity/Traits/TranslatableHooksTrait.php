@@ -9,7 +9,7 @@ use Survos\BabelBundle\Runtime\BabelRuntime;
  * Attach to entities with #[Translatable] fields.
  * - $tCodes holds field => hash (persisted if you map it)
  * - resolveTranslatable() returns resolved text using BabelRuntime
- * - getBackingValue() lets listeners safely access private/protected backings
+ * - getBackingValue() lets listeners safely access backings
  */
 trait TranslatableHooksTrait
 {
@@ -25,7 +25,7 @@ trait TranslatableHooksTrait
             return $backingValue;
         }
 
-        // Return cached if present
+        // Return cache if present
         if (\array_key_exists($field, $this->_resolved)) {
             return $this->_resolved[$field];
         }
@@ -37,17 +37,20 @@ trait TranslatableHooksTrait
         }
 
         $context ??= $field;
-        $fallback = BabelRuntime::fallback();
 
+        // Prefer mapped code; otherwise compute via runtime hasher (must match BabelHasher)
         $codes = (array)($this->tCodes ?? []);
-        $hash  = $codes[$field] ?? BabelRuntime::hash($backingValue, $fallback, $context);
+        $hash  = $codes[$field] ?? BabelRuntime::hash($backingValue, BabelRuntime::fallback(), $context);
+
         $text  = BabelRuntime::lookup($hash, $locale) ?? $backingValue;
         return $this->_resolved[$field] = $text;
     }
 
-    public function setResolvedTranslation(string $field, string $text): void
+    public function setResolvedTranslation(string $field, ?string $text): void
     {
-        $this->_resolved[$field] = $text;
+        if ($text !== null) {
+            $this->_resolved[$field] = $text;
+        }
     }
 
     public function getResolvedTranslation(string $field): ?string
@@ -57,16 +60,20 @@ trait TranslatableHooksTrait
 
     /**
      * Safe accessor for raw source/backing content, used by listeners.
-     * Tries "$field" then "$fieldBacking".
+     * Tries snake case "<field>_backing", then camel "<field>Backing", then "<field>".
      */
     public function getBackingValue(string $field): mixed
     {
+        $snake = $field . '_backing';
+        if (\property_exists($this, $snake)) {
+            return $this->$snake ?? null;
+        }
+        $camel = $field . 'Backing';
+        if (\property_exists($this, $camel)) {
+            return $this->$camel ?? null;
+        }
         if (\property_exists($this, $field)) {
             return $this->$field ?? null;
-        }
-        $backing = $field . 'Backing';
-        if (\property_exists($this, $backing)) {
-            return $this->$backing ?? null;
         }
         return null;
     }

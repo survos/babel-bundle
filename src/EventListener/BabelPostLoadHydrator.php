@@ -13,15 +13,11 @@ use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\BabelBundle\Util\BabelHasher;
 
 /**
- * Hydrates resolved translations via TranslatableHooksTrait methods (no reflection).
- * Requirements on the entity:
- *  - getBackingValue(string $field): mixed
- *  - setResolvedTranslation(string $field, string $text): void
+ * PostLoad hydrator for string-backed translations.
  *
- * Strategy:
- *  1) Compute per-field hashes based on source-locale + context + original backing value
- *  2) Fetch ONLY the current request locale's translations for those hashes
- *  3) Write them via setResolvedTranslation($field, $text)
+ * IMPORTANT: TranslatableHooksTrait resolves via $_resolved and BabelRuntime,
+ * not $_i18n. So we populate $_resolved (via setResolvedTranslation) and
+ * optionally tCodes[field] = hash for later runtime lookups.
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
@@ -29,7 +25,7 @@ final class BabelPostLoadHydrator
     public function __construct(
         private readonly TranslatableIndex $index,
         private readonly LocaleContext $locale,
-        private readonly ?LoggerInterface $logger = null,
+        private readonly LoggerInterface $logger
     ) {}
 
     public function postLoad(PostLoadEventArgs $args): void
@@ -38,124 +34,102 @@ final class BabelPostLoadHydrator
         $entity = $args->getObject();
         $class  = $entity::class;
 
-        // What fields should we hydrate?
+        // Only entities in the compile-time index
         $fields = $this->index->fieldsFor($class);
-        if ($fields === []) {
-            // nothing to do for this class
-            return;
-        }
+        if ($fields === []) return;
 
-        // Enforce hooks API (no legacy _i18n / no reflection)
-        if (!\method_exists($entity, 'getBackingValue') || !\method_exists($entity, 'setResolvedTranslation')) {
-            throw new \LogicException(sprintf(
-                'Entity %s must use TranslatableHooksTrait (getBackingValue/setResolvedTranslation) for hydration.',
-                $class
-            ));
+        // We require the hook API to retrieve the backing (original) value
+        if (!\method_exists($entity, 'getBackingValue')) {
+            $this->logger->warning('Babel Hydrator: entity missing hooks API; skipping.', [
+                'class'=>$class,
+            ]);
+            return;
         }
 
         $cfg      = $this->index->configFor($class);
         $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
 
-        // Source-locale for hashing; prefer #[BabelLocale] (recorded as localeProp) else bundle default
+        // Source locale for hashing (NOT the request locale): BabelLocale accessor or default
         $srcLocale = $this->resolveSourceLocale($entity, $class);
 
-        // Build hash per field from backing (avoid reading the public hook to prevent recursion)
+        // Display locale (what we want to show now)
+        $displayLocale = $this->locale->get();
+
+        // Compute hashes per field from backing + context
         $fieldToHash = [];
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
-            if (!\is_string($original) || $original === '') {
-                continue;
-            }
-            $context = $fieldCfg[$field]['context'] ?? null;
-            $hash    = BabelHasher::forString($srcLocale, $context, $original);
+            if (!\is_string($original) || $original === '') continue;
+
+            $ctx  = $fieldCfg[$field]['context'] ?? null;
+            $hash = BabelHasher::forString($srcLocale, $ctx, $original);
+
             $fieldToHash[$field] = $hash;
+
+            // Maintain tCodes if present (optional, not persisted unless mapped)
+            if (\property_exists($entity, 'tCodes')) {
+                $codes = (array)($entity->tCodes ?? []);
+                $codes[$field] = $hash;
+                $entity->tCodes = $codes;
+            }
+
+            $this->logger->debug('Babel Hydrator hash', [
+                'class'=>$class, 'field'=>$field, 'src'=>$srcLocale, 'ctx'=>$ctx, 'hash'=>$hash
+            ]);
         }
+        if ($fieldToHash === []) return;
 
-        if ($fieldToHash === []) {
-            $this->logger?->debug('BabelPostLoadHydrator: no originals to hash', ['class' => $class]);
-            return;
-        }
-
-        // Fetch translations only for the current target locale
-        $targetLocale = $this->locale->get();
-
+        // Fetch just the display-locale rows
         $conn = $em->getConnection();
-        $qb   = $conn->createQueryBuilder();
-        $qb->select('hash', 'text')
-            ->from('str_translation')
-            ->where($qb->expr()->in('hash', ':hashes'))
-            ->andWhere('locale = :loc')
-            ->setParameter('hashes', array_values($fieldToHash), ArrayParameterType::STRING)
-            ->setParameter('loc', $targetLocale);
-//        $query = $qb->getSQL(); dd($qb->getSQL(), $targetLocale);
+        $rows = $conn->executeQuery(
+            'SELECT hash, text FROM str_translation WHERE hash IN (?) AND locale = ?',
+            [\array_values($fieldToHash), $displayLocale],
+            [ArrayParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
+        )->fetchAllAssociative();
 
-        $rows = $qb->executeQuery()->fetchAllAssociative();
-        foreach ($rows as $row) { dump($row); }
-
-        // Build hash => text map (skip nulls)
-        $map = [];
+        $byHash = [];
         foreach ($rows as $r) {
             $h = (string)($r['hash'] ?? '');
             $t = $r['text'] ?? null;
-            if ($h !== '' && \is_string($t)) {
-                $map[$h] = $t;
-            }
+            if ($h !== '') $byHash[$h] = \is_string($t) ? $t : null;
         }
 
-        // Apply via hooks
-        $applied = 0;
+        // Fill the runtime cache used by the property hook
+        $setResolved = \method_exists($entity, 'setResolvedTranslation');
         foreach ($fieldToHash as $field => $hash) {
-            $text = $map[$hash] ?? null;
-            if (!\is_string($text) || $text === '') {
+            if (!\array_key_exists($hash, $byHash)) {
+                $this->logger->warning('Babel hydration: no StrTranslation row found for hash', [
+                    'class'=>$class, 'field'=>$field, 'hash'=>$hash,
+                    'displayLocale'=>$displayLocale, 'srcLocale'=>$srcLocale
+                ]);
                 continue;
             }
-            $entity->setResolvedTranslation($field, $text);
-            $applied++;
+            if ($setResolved) {
+                $entity->setResolvedTranslation($field, $byHash[$hash]);
+            } else {
+                // Last-resort: place into a conventional map the resolver might read
+                if (!\property_exists($entity, '_i18n') || !\is_array($entity->_i18n ?? null)) {
+                    $entity->_i18n = [];
+                }
+                $entity->_i18n[$displayLocale][$field] = $byHash[$hash];
+            }
         }
-
-
-        $this->logger?->debug('BabelPostLoadHydrator: hydrated', [
-            'class'   => $class,
-            'locale'  => $targetLocale,
-            'applied' => $applied,
-            'fields'  => array_keys($fieldToHash),
-        ]);
     }
 
-    /**
-     * Resolve source-locale used for hashing:
-     * - prefers TranslatableIndex::configFor($class)['localeProp'] (from #[BabelLocale])
-     * - tries a conventional getter first, then a public property
-     * - falls back to bundle default (not the request/UI locale)
-     */
+    /** Accessor defined in the compile-time index (prop/method) or fallback to default locale. */
     private function resolveSourceLocale(object $entity, string $class): string
     {
-        $current = $this->locale->get();
-        $default = \method_exists($this->locale, 'getDefault') ? (string)$this->locale->getDefault() : $current;
-
-        $cfg  = $this->index->configFor($class);
-        $prop = \is_string($cfg['localeProp'] ?? null) ? $cfg['localeProp'] : null;
-
-        if ($prop !== null && $prop !== '') {
-            $getter = 'get' . \ucfirst($prop);
-            if (\method_exists($entity, $getter)) {
-                try {
-                    $val = $entity->$getter();
-                    if (\is_string($val) && $val !== '') {
-                        return $val;
-                    }
-                } catch (\Throwable) {
-                    // ignore and fall through
-                }
+        $acc = $this->index->localeAccessorFor($class);
+        if ($acc) {
+            if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
+                $v = $entity->{$acc['name']} ?? null;
+                if (\is_string($v) && $v !== '') return $v;
             }
-            if (\property_exists($entity, $prop)) {
-                $val = $entity->$prop ?? null;
-                if (\is_string($val) && $val !== '') {
-                    return $val;
-                }
+            if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
+                $v = $entity->{$acc['name']}();
+                if (\is_string($v) && $v !== '') return $v;
             }
         }
-
-        return $default;
+        return $this->locale->getDefault();
     }
 }

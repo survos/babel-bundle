@@ -10,6 +10,7 @@ use Survos\BabelBundle\Entity\Base\StrTranslationBase;
 use Survos\BabelBundle\Event\TranslateStringEvent;
 use Survos\BabelBundle\Service\ExternalTranslatorBridge;
 use Survos\BabelBundle\Service\LocaleContext;
+use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
@@ -26,6 +27,7 @@ final class TranslateCommand
         private readonly LoggerInterface          $logger,
         private readonly LocaleContext            $localeContext,
         private readonly EventDispatcherInterface $dispatcher,
+        private readonly TranslatableIndex $index,
         private readonly ?ExternalTranslatorBridge $bridge = null, // soft dep; may be null
     ) {}
 
@@ -115,7 +117,7 @@ final class TranslateCommand
                 }
 
                 $original  = (string) $str->original;
-                $srcLocale = $str->srcLocale ?: $this->localeContext->getDefault();
+                $srcLocale = $this->resolveSourceLocaleForStr($str);
 
                 // 1) EVENT FIRST: let listeners provide a translation
                 $evt = new TranslateStringEvent(
@@ -201,5 +203,19 @@ final class TranslateCommand
         }
         $io->warning('Specify locales (e.g. "es,fr") or pass --all.');
         return null;
+    }
+
+    private function resolveSourceLocaleForStr(object $str): string
+    {
+        $acc = $this->index->localeAccessorFor($str::class) ?? ['type'=>'prop','name'=>'srcLocale','format'=>null];
+        if ($acc['type']==='prop' && \property_exists($str, $acc['name'])) {
+            $v = $str->{$acc['name']} ?? null;
+            if (\is_string($v) && $v !== '') return $v;
+        }
+        if ($acc['type']==='method' && \method_exists($str, $acc['name'])) {
+            $v = $str->{$acc['name']}();
+            if (\is_string($v) && $v !== '') return $v;
+        }
+        return $this->localeContext->getDefault();
     }
 }

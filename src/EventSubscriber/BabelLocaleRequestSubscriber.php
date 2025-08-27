@@ -35,7 +35,6 @@ final class BabelLocaleRequestSubscriber implements EventSubscriberInterface
         $req = $event->getRequest();
         // Prefer _locale attribute if present (from routing), else the resolved Request locale
         $loc = $req->attributes->get('_locale') ?? $req->getLocale();
-
         if (\is_string($loc) && $loc !== '') {
             try {
                 $this->context->set($loc);
@@ -48,5 +47,6 @@ final class BabelLocaleRequestSubscriber implements EventSubscriberInterface
                 ]);
             }
         }
+
     }
 }

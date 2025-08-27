@@ -4,84 +4,71 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
-use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Service\LocaleContext;
-use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
-use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
+use Symfony\Component\Console\Command\Command;
 
 #[AsCommand('babel:browse', 'Show translated fields for an entity (property-mode uses postLoad hydration)')]
-final class BabelBrowseCommand
+final class BabelBrowseCommand extends Command
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
-        private readonly TranslatableIndex $index,
         private readonly LocaleContext $locale,
-        private readonly ?LoggerInterface $logger = null,
     ) {}
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Entity FQCN (e.g. App\\Entity\\Article) or short name (e.g. Article)')] string $entity,
-        #[Option('Target locale (defaults to current request/Context)')] ?string $locale = null,
+        InputInterface $input,
+        #[Argument('Entity FQCN (e.g. App\\Entity\\Article) or short name (e.g. Article)')] ?string $entity = null,
+        #[Option('Target locale (defaults to current request/Context)', name: 'locale', shortcut: 'L')] ?string $localeOpt = null,
         #[Option('Max rows to show')] int $limit = 5,
     ): int {
-        // Resolve class from short name if needed
-        if (!class_exists($entity)) {
-            $candidate = 'App\\Entity\\' . ltrim($entity, '\\');
-            if (class_exists($candidate)) {
-                $entity = $candidate;
-            } else {
-                $io->error(sprintf('Entity class not found: %s', $entity));
-                return Command::FAILURE;
-            }
+        // Friendly guard when users type: babel:browse fr
+        if ($entity && \preg_match('/^[a-z]{2}(?:-[A-Z]{2})?$/', $entity) && !$localeOpt) {
+            $io->note(sprintf('Did you mean: babel:browse <Entity> --locale=%s ?', $entity));
+            return 1;
         }
 
-        $fields = $this->index->fieldsFor($entity);
-        if ($fields === []) {
-            $io->warning(sprintf('No translatable fields in index for %s.', $entity));
-            return Command::SUCCESS;
+        if (!$entity) {
+            $io->error('Missing entity argument (e.g. Article).'); return 1;
         }
 
-        if ($locale) {
-            try { $this->locale->set($locale); }
-            catch (\Throwable $e) { $io->warning('Locale not set: '.$e->getMessage()); }
-        }
-        $target = $this->locale->get();
-
-        $repo = $this->em->getRepository($entity);
-
-        // Try to get a few rows (works for most apps). Adjust as needed.
-        $items = $repo->findBy([], null, max(1, $limit));
-        if (!$items) {
-            $io->note('No rows found.');
-            return Command::SUCCESS;
+        // Apply requested display locale so property hooks select the right text
+        if ($localeOpt) {
+            $this->locale->set($localeOpt);
         }
 
-        $io->section(sprintf('%s (locale=%s)', $entity, $target));
-        $headers = array_merge(['#'], $fields);
+        $fqcn = \class_exists($entity) ? $entity : 'App\\Entity\\'.$entity;
+        if (!\class_exists($fqcn)) {
+            $io->error(sprintf('Entity class not found: %s', $entity));
+            return 1;
+        }
+
+        $repo = $this->em->getRepository($fqcn);
+        $items = $repo->createQueryBuilder('e')->setMaxResults($limit)->getQuery()->getResult();
+
+        $io->title(sprintf('%s (locale=%s)', $fqcn, $this->locale->get()));
+
+        // naive field pick: show any public translatable hooks if present
         $rows = [];
-
-        $i = 1;
-        foreach ($items as $obj) {
-            // postLoad should have hydrated setResolvedTranslation(); using public property
-            $line = [$i++];
-            foreach ($fields as $f) {
-                try {
-                    // reading public property triggers hooks getter; hydrator already set resolved cache
-                    $line[] = (string)($obj->$f ?? '');
-                } catch (\Throwable $e) {
-                    $this->logger?->debug('browse: read error', ['field'=>$f,'err'=>$e->getMessage()]);
-                    $line[] = '(error)';
+        foreach ($items as $i => $obj) {
+            $row = ['#' => (string)($obj->id ?? ($i+1))];
+            foreach (['title','name','label','content','description'] as $f) {
+                if (\property_exists($obj, $f)) {
+                    $row[$f] = $obj->{$f};
                 }
             }
-            $rows[] = $line;
+            $rows[] = $row;
         }
-
-        $io->table($headers, $rows);
-        return Command::SUCCESS;
+        if ($rows) {
+            $io->table(array_keys($rows[0]), $rows);
+        } else {
+            $io->writeln('(no rows)');
+        }
+        return 0;
     }
 }
