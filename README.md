@@ -97,7 +97,7 @@ class Post
 ### After running `code:translatable:trait`
 
 * A trait `src/Entity/Translations/PostTranslationsTrait.php` is generated with **property hooks** and a backing property (`$titleBacking`, …).
-* Your entity `use`s that trait plus `TranslatableHooksTrait`, which supplies the hooks API the hydrator expects.
+* Your entity `use`s that trait plus `BabelHooksTrait`, which supplies the hooks API the hydrator expects.
 * Continue using `$post->title = 'Hello';` — the backing value is persisted; the write listener computes the **hash**, upserts `str` + source `str_translation`, and provisions placeholders for other locales.
 
 ---
@@ -125,12 +125,12 @@ Mark entities that store translations with `#[BabelStorage]` so the router can s
 
 ```php
 use Survos\BabelBundle\Attribute\BabelStorage;
-use Survos\BabelBundle\Entity\Traits\TranslatableHooksTrait;
+use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 
 #[BabelStorage]
 class Article implements TranslatableResolvedInterface
 {
-    use TranslatableHooksTrait;
+    use BabelHooksTrait;
     // … fields with #[Translatable]
 }
 ```
@@ -209,7 +209,7 @@ All Survos commands use Symfony 7.3 **invokable** style with attribute argument
 
 * **Nothing listed by `babel:translatables:dump`** — ensure compiler passes are running; clear cache. Entities/traits should import `#[Translatable]` from this bundle.
 * **`EngineResolver failed for browse`** — add `#[BabelStorage]` to your entity so property‑mode storage is selected.
-* **Hydrator warning: hooks missing** — ensure your entity `use`s `TranslatableHooksTrait` (or provides equivalent methods). Legacy `_i18n` is no longer supported.
+* **Hydrator warning: hooks missing** — ensure your entity `use`s `BabelHooksTrait` (or provides equivalent methods). Legacy `_i18n` is no longer supported.
 * **DeepL 400 “Parameter 'text' not specified.”** — we send form-encoded `text`; if you overrode the engine, ensure it uses `text=<string>` (not array) for single translate.
 * **SQLite locks** — consider `?busy_timeout=5000` and keep the queued writes + postFlush drainer enabled.
 

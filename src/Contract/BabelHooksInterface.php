@@ -7,7 +7,7 @@ namespace Survos\BabelBundle\Contract;
  * Entities that expose resolved translations at runtime.
  * Keep this interface focused on RUNTIME access only.
  */
-interface TranslatableResolvedInterface
+interface BabelHooksInterface
 {
     /**
      * Store resolved translation for a given field (non-persisted cache).

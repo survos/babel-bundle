@@ -15,7 +15,7 @@ use Survos\BabelBundle\Util\BabelHasher;
 /**
  * PostLoad hydrator for string-backed translations.
  *
- * IMPORTANT: TranslatableHooksTrait resolves via $_resolved and BabelRuntime,
+ * IMPORTANT: BabelHooksTrait resolves via $_resolved and BabelRuntime,
  * not $_i18n. So we populate $_resolved (via setResolvedTranslation) and
  * optionally tCodes[field] = hash for later runtime lookups.
  */

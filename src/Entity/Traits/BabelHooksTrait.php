@@ -11,7 +11,7 @@ use Survos\BabelBundle\Runtime\BabelRuntime;
  * - resolveTranslatable() returns resolved text using BabelRuntime
  * - getBackingValue() lets listeners safely access backings
  */
-trait TranslatableHooksTrait
+trait BabelHooksTrait
 {
     /** @var array<string,string>|null persisted codes: field => hash */
     public ?array $tCodes = null;
