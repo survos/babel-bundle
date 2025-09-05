@@ -364,7 +364,7 @@ PHPX);
 <?php
 declare(strict_types=1);
 
-namespace App.Repository;
+namespace App\Repository;
 
 use App\Entity\StrTranslation;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;

@@ -18,7 +18,9 @@ final class BabelBrowseCommand extends Command
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly LocaleContext $locale,
-    ) {}
+    ) {
+        parent::__construct();
+    }
 
     public function __invoke(
         SymfonyStyle $io,
