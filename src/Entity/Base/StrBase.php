@@ -53,6 +53,10 @@ abstract class StrBase
         get => mb_strlen($this->original ?? '');
     }
 
+    public function hasTranslationFor($loc): bool {
+        return $this->localeStatuses ? array_key_exists($loc, $this->localeStatuses) : false;
+    }
+
     // the PostFlushListener creates this in raw SQL so the constructor is rarely called.
     public function __construct(string $hash, string $original, string $srcLocale, ?string $context = null)
     {
