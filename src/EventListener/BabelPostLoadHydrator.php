@@ -43,6 +43,7 @@ final class BabelPostLoadHydrator
             $this->logger->warning('Babel Hydrator: entity missing hooks API; skipping.', [
                 'class'=>$class,
             ]);
+            assert(false, "Missing hooks API in " . $entity::class);
             return;
         }
 

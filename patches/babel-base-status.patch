@@ -1,0 +1,24 @@
+*** a/src/Entity/Base/StrBase.php
+--- b/src/Entity/Base/StrBase.php
+***************
+@@
+ abstract class StrBase
+ {
+@@
+     public ?array $meta = null;
+@@
+     public \DateTimeImmutable $updatedAt;
++
++    #[ORM\Column(length: 32, nullable: true)]
++    public ?string $status = null; // optional "current marking" mirror for non-workflow contexts
+*** a/src/Entity/Base/StrTranslationBase.php
+--- b/src/Entity/Base/StrTranslationBase.php
+***************
+@@
+ abstract class StrTranslationBase
+ {
+@@
+     public \DateTimeImmutable $updatedAt;
++
++    #[ORM\Column(length: 32, nullable: true)]
++    public ?string $status = null; // optional "current marking" mirror

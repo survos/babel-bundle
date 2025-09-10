@@ -1,42 +1,41 @@
 {
-  "name": "survos/babel-bundle",
-  "description": "Lightweight translation base (Str/StrTranslation) + Translatable attribute & subscriber",
-  "type": "symfony-bundle",
-  "license": "MIT",
-  "autoload": {
-    "psr-4": {
-      "Survos\\BabelBundle\\": "src/"
+    "name": "survos/babel-bundle",
+    "description": "Lightweight translation base (Str/StrTranslation) + Translatable attribute & subscriber",
+    "license": "MIT",
+    "type": "symfony-bundle",
+    "require": {
+        "php": "^8.4",
+        "ext-intl": "*",
+        "ext-mbstring": "*",
+        "doctrine/orm": "^2.12 || ^3.3",
+        "symfony/dependency-injection": "^7.3",
+        "symfony/http-kernel": "^7.3",
+        "doctrine/doctrine-bundle": "^2.7",
+        "symfony/property-access": "^7.3",
+        "symfony/translation": "^7.3",
+        "symfony/console": "^7.3",
+        "doctrine/persistence": "^4.1"
+    },
+    "require-dev": {
+        "nikic/php-parser": "^5.6",
+        "nette/php-generator": "^4.1",
+        "phpstan/phpstan": "^2.0",
+        "phpunit/phpunit": "^12",
+        "survos/translator-bundle": "dev-main"
+    },
+    "autoload": {
+        "psr-4": {
+            "Survos\\BabelBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Survos\\BabelBundle\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "branch-alias": {
+            "dev-main": "1.x-dev"
+        }
     }
-  },
-  "autoload-dev": {
-    "psr-4": {
-      "Survos\\BabelBundle\\Tests\\": "tests/"
-    }
-  },
-  "require": {
-    "php": "^8.4",
-    "ext-intl": "*",
-    "ext-mbstring": "*",
-    "doctrine/orm": "^3.5",
-    "symfony/dependency-injection": "^7.3",
-    "symfony/http-kernel": "^7.3",
-    "doctrine/doctrine-bundle": "^2.15",
-    "symfony/property-access": "^7.3",
-    "symfony/translation": "^7.3",
-    "symfony/console": "^7.3",
-    "doctrine/persistence": "^4"
-  },
-  "extra": {
-    "branch-alias": {
-      "dev-main": "1.x-dev"
-    }
-  },
-  "require-dev": {
-    "survos/libre-translate-bundle": "^1.6",
-    "nikic/php-parser": "^5",
-    "nette/php-generator": "^4",
-    "phpstan/phpstan": "^2.1",
-    "phpunit/phpunit": "^12.3",
-    "survos/translator-bundle": "dev-main"
-  }
 }

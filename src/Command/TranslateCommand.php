@@ -37,6 +37,7 @@ final class TranslateCommand
         #[Argument('Target locales (comma-delimited) or empty to use --all')] ?string $localesArg = null,
         #[Option('Use all framework.enabled_locales when locales argument is empty')] bool $all = false,
         #[Option('Limit number to translate per locale (0 = unlimited)')] int $limit = 0,
+        #[Option('batch flush')] int $batch = 10,
         #[Option('Dry-run: do not write')] bool $dryRun = false,
         #[Option('Engine name (TranslatorBundle). If omitted and bundle is present, uses default engine.')] ?string $engine = null,
         #[Option('Str entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrBase)')] string $strClass = 'App\\Entity\\Str',
@@ -160,7 +161,7 @@ final class TranslateCommand
                 $done++;
                 $grandTotal++;
 
-                if (!$dryRun && ($done % 200) === 0) {
+                if (!$dryRun && ($done % $batch) === 0) {
                     $this->em->flush();
                     $this->em->clear();
                     $strRepo = $this->em->getRepository($strClass);
