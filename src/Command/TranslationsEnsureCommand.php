@@ -6,6 +6,7 @@ namespace Survos\BabelBundle\Command;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Service\LocaleContext;
+use Survos\BabelBundle\Util\HashUtil;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
@@ -83,7 +84,10 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
                 if ($exists) continue;
 
                 if (!$dryRun) {
-                    $tr = new $trClass($str->hash, $locale, null);
+                    $tr = new $trClass(
+                        HashUtil::calcTranslationKey($str->hash, $locale),
+                        $str->hash,
+                        $locale, null);
                     // this happens in the constructor
 //                    $tr->updatedAt = new \DateTimeImmutable();
                     $this->em->persist($tr);

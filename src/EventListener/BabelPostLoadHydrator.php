@@ -5,19 +5,19 @@ namespace Survos\BabelBundle\EventListener;
 
 use Doctrine\Bundle\DoctrineBundle\Attribute\AsDoctrineListener;
 use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
-use Survos\BabelBundle\Util\BabelHasher;
+use Survos\BabelBundle\Util\HashUtil;
 
 /**
  * PostLoad hydrator for string-backed translations.
  *
- * IMPORTANT: BabelHooksTrait resolves via $_resolved and BabelRuntime,
- * not $_i18n. So we populate $_resolved (via setResolvedTranslation) and
- * optionally tCodes[field] = hash for later runtime lookups.
+ * FIX: use the canonical STR key and look up TR rows by (str_hash, locale),
+ * not by TR.primary-key. This matches our schema and HashUtil convention.
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
@@ -34,85 +34,98 @@ final class BabelPostLoadHydrator
         $entity = $args->getObject();
         $class  = $entity::class;
 
-        // Only entities in the compile-time index
+        // Only entities registered in the index
         $fields = $this->index->fieldsFor($class);
-        if ($fields === []) return;
+        if ($fields === []) {
+            return;
+        }
 
-        // We require the hook API to retrieve the backing (original) value
+        // Need the hook API to get the *backing* (original) values
         if (!\method_exists($entity, 'getBackingValue')) {
-            $this->logger->warning('Babel Hydrator: entity missing hooks API; skipping.', [
-                'class'=>$class,
-            ]);
-            assert(false, "Missing hooks API in " . $entity::class);
+            $this->logger->warning('Babel Hydrator: entity missing hooks API; skipping.', ['class' => $class]);
             return;
         }
 
         $cfg      = $this->index->configFor($class);
         $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
 
-        // Source locale for hashing (NOT the request locale): BabelLocale accessor or default
+        // Source locale for hashing (NOT the request/display locale)
         $srcLocale = $this->resolveSourceLocale($entity, $class);
 
-        // Display locale (what we want to show now)
+        // What we want to display right now
         $displayLocale = $this->locale->get();
 
-        // Compute hashes per field from backing + context
-        $fieldToHash = [];
+        // Compute canonical STR hashes per field from backing + source locale
+        $fieldToStrHash = [];
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
-            if (!\is_string($original) || $original === '') continue;
+            if (!\is_string($original) || $original === '') {
+                continue;
+            }
 
-            $ctx  = $fieldCfg[$field]['context'] ?? null;
-            $hash = BabelHasher::forString($srcLocale, $ctx, $original);
+            // NOTE: context no longer participates in key — HashUtil::calcSourceKey(original, src)
+            // If you need context in the key again, reintroduce it in HashUtil and here.
+            $strHash = HashUtil::calcSourceKey($original, $srcLocale);
+            $fieldToStrHash[$field] = $strHash;
 
-            $fieldToHash[$field] = $hash;
-
-            // Maintain tCodes if present (optional, not persisted unless mapped)
+            // Maintain tCodes if present (optional)
             if (\property_exists($entity, 'tCodes')) {
                 $codes = (array)($entity->tCodes ?? []);
-                $codes[$field] = $hash;
+                $codes[$field] = $strHash;
                 $entity->tCodes = $codes;
             }
 
-            $this->logger->debug('Babel Hydrator hash', [
-                'class'=>$class, 'field'=>$field, 'src'=>$srcLocale, 'ctx'=>$ctx, 'hash'=>$hash
+            $this->logger->debug('Babel Hydrator STR key', [
+                'class' => $class, 'field' => $field, 'src' => $srcLocale, 'hash' => $strHash
             ]);
         }
-        if ($fieldToHash === []) return;
 
-        // Fetch just the display-locale rows
-        $conn = $em->getConnection();
-        $rows = $conn->executeQuery(
-            'SELECT hash, text FROM str_translation WHERE hash IN (?) AND locale = ?',
-            [\array_values($fieldToHash), $displayLocale],
-            [ArrayParameterType::STRING, \Doctrine\DBAL\ParameterType::STRING]
-        )->fetchAllAssociative();
-
-        $byHash = [];
-        foreach ($rows as $r) {
-            $h = (string)($r['hash'] ?? '');
-            $t = $r['text'] ?? null;
-            if ($h !== '') $byHash[$h] = \is_string($t) ? $t : null;
+        if ($fieldToStrHash === []) {
+            return;
         }
 
-        // Fill the runtime cache used by the property hook
+        // Fetch translations for the display locale by (str_hash, locale)
+        $conn = $em->getConnection();
+        $rows = $conn->executeQuery(
+            'SELECT str_hash, text 
+               FROM str_translation 
+              WHERE str_hash IN (?) AND locale = ?',
+            [\array_values($fieldToStrHash), $displayLocale],
+            [ArrayParameterType::STRING, ParameterType::STRING]
+        )->fetchAllAssociative();
+
+        $byStrHash = [];
+        foreach ($rows as $r) {
+            $k = (string)($r['str_hash'] ?? '');
+            $t = $r['text'] ?? null;
+            if ($k !== '') {
+                $byStrHash[$k] = \is_string($t) ? $t : null;
+            }
+        }
+
+        // Fill the runtime cache used by property hooks
         $setResolved = \method_exists($entity, 'setResolvedTranslation');
-        foreach ($fieldToHash as $field => $hash) {
-            if (!\array_key_exists($hash, $byHash)) {
-                $this->logger->warning('Babel hydration: no StrTranslation row found for hash', [
-                    'class'=>$class, 'field'=>$field, 'hash'=>$hash,
-                    'displayLocale'=>$displayLocale, 'srcLocale'=>$srcLocale
+        foreach ($fieldToStrHash as $field => $strHash) {
+            if (!\array_key_exists($strHash, $byStrHash)) {
+                $this->logger->warning('Babel hydration: no StrTranslation row found for (str_hash, locale)', [
+                    'class'         => $class,
+                    'field'         => $field,
+                    'str_hash'      => $strHash,
+                    'displayLocale' => $displayLocale,
+                    'srcLocale'     => $srcLocale,
                 ]);
                 continue;
             }
+            $text = $byStrHash[$strHash];
+
             if ($setResolved) {
-                $entity->setResolvedTranslation($field, $byHash[$hash]);
+                $entity->setResolvedTranslation($field, $text);
             } else {
-                // Last-resort: place into a conventional map the resolver might read
+                // last-resort stash
                 if (!\property_exists($entity, '_i18n') || !\is_array($entity->_i18n ?? null)) {
                     $entity->_i18n = [];
                 }
-                $entity->_i18n[$displayLocale][$field] = $byHash[$hash];
+                $entity->_i18n[$displayLocale][$field] = $text;
             }
         }
     }
@@ -124,11 +137,15 @@ final class BabelPostLoadHydrator
         if ($acc) {
             if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']} ?? null;
-                if (\is_string($v) && $v !== '') return $v;
+                if (\is_string($v) && $v !== '') {
+                    return $v;
+                }
             }
             if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']}();
-                if (\is_string($v) && $v !== '') return $v;
+                if (\is_string($v) && $v !== '') {
+                    return $v;
+                }
             }
         }
         return $this->locale->getDefault();

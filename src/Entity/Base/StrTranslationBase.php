@@ -4,10 +4,12 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Entity\Base;
 
 use Doctrine\ORM\Mapping as ORM;
+use Survos\BabelBundle\Runtime\BabelRuntime;
 
 #[ORM\MappedSuperclass]
 abstract class StrTranslationBase
 {
+
     #[ORM\Column(type: 'json', nullable: true)]
     public ?array $meta = null;
 
@@ -21,12 +23,21 @@ abstract class StrTranslationBase
     #[ORM\Column(length: 32, nullable: true)]
     public ?string $status = null;
 
+    // overwrite to set marking, etc.
+    public function init(): void
+    {
+
+    }
+
     // the PostFlushListener creates this in raw SQL so the constructor is rarely called.
     public function __construct(
         #[ORM\Id]
-        #[ORM\Column(length: 64)]
-        public readonly string $hash,
-        #[ORM\Id]
+        #[ORM\Column(length: 40, unique: true)]
+        public readonly string $hash, // strHash + targetLocale
+
+        #[ORM\Column(length: 32)]
+        public readonly string $strHash, // same as str->hash
+
         #[ORM\Column(length: 8)]
         public readonly string $locale,
         #[ORM\Column(type: 'text', nullable: true)]
@@ -34,6 +45,7 @@ abstract class StrTranslationBase
     ) {
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = $this->createdAt;
+        $this->init();
     }
 
     // ----- Property hooks (computed helpers) -----

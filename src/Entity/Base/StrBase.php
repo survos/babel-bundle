@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Survos\BabelBundle\Entity\Base;
 
 use Doctrine\ORM\Mapping as ORM;
+use Survos\BabelBundle\Runtime\BabelRuntime;
 
 #[ORM\MappedSuperclass]
 abstract class StrBase

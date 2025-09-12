@@ -27,7 +27,7 @@ final class TranslateCommand
         private readonly LoggerInterface          $logger,
         private readonly LocaleContext            $localeContext,
         private readonly EventDispatcherInterface $dispatcher,
-        private readonly TranslatableIndex $index,
+        private readonly TranslatableIndex        $index,
         private readonly ?ExternalTranslatorBridge $bridge = null, // soft dep; may be null
     ) {}
 
@@ -101,12 +101,26 @@ final class TranslateCommand
 
             foreach ($iter as $tr) {
                 /** @var StrTranslationBase $tr */
-                $hash = $tr->hash;
+                $trHash    = $tr->hash;      // translation key (e.g. "<strHash>-<locale>")
+                $sourceKey = $tr->strHash ?? null; // ✅ canonical pointer to Str.hash
+
+                if (!$sourceKey) {
+                    $this->logger->warning('StrTranslation missing str_hash; skipping.', [
+                        'tr.hash' => $trHash,
+                        'locale'  => $targetLocale,
+                    ]);
+                    $done++;
+                    continue;
+                }
 
                 /** @var StrBase|null $str */
-                $str = $strRepo->find($hash);
+                $str = $strRepo->find($sourceKey); // ✅ look up by Str.hash, not by TR.hash
                 if (!$str) {
-                    $this->logger->warning('Missing Str for StrTranslation hash; skipping.', ['hash' => $hash, 'locale' => $targetLocale]);
+                    $this->logger->warning('Missing Str for StrTranslation; skipping.', [
+                        'tr.hash'   => $trHash,
+                        'tr.locale' => $targetLocale,
+                        'str_hash'  => $sourceKey,
+                    ]);
                     $done++;
                     continue;
                 }
@@ -122,7 +136,7 @@ final class TranslateCommand
 
                 // 1) EVENT FIRST: let listeners provide a translation
                 $evt = new TranslateStringEvent(
-                    hash:         $hash,
+                    hash:         $sourceKey,     // ✅ pass the STR key (source), not the TR key
                     original:     $original,
                     sourceLocale: $srcLocale,
                     targetLocale: $targetLocale,
@@ -138,7 +152,7 @@ final class TranslateCommand
                         $translated = (string) ($result['translatedText'] ?? '');
                     } catch (\Throwable $e) {
                         $this->logger->warning('TranslatorBundle fallback failed', [
-                            'hash' => $hash, 'src' => $srcLocale, 'dst' => $targetLocale, 'err' => $e->getMessage(),
+                            'str_hash' => $sourceKey, 'src' => $srcLocale, 'dst' => $targetLocale, 'err' => $e->getMessage(),
                         ]);
                         $translated = null;
                     }

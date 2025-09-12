@@ -15,6 +15,9 @@ namespace Survos\BabelBundle\Runtime;
  */
 final class BabelRuntime
 {
+    public const TRANSLATION_TABLE = 'str_translation';
+    public const STRING_TABLE = 'str';
+
     private static ?string $locale = null;
     private static string $fallback = 'en';
 
