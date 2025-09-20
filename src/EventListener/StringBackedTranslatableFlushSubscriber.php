@@ -27,8 +27,10 @@ final class StringBackedTranslatableFlushSubscriber
         private readonly LoggerInterface $logger,
         private readonly LocaleContext $locale,
         private readonly TranslatableIndex $index,
-        #[Autowire('%kernel.debug%')] private readonly bool $debug = false,
-    ) {}
+//        #[Autowire('%kernel.debug%')]
+        private readonly bool $debug = false,
+    ) {
+    }
 
     /** @var array<string, array{original:string, src:string}> keyed by STR.hash */
     private array $pending = [];
@@ -52,14 +54,14 @@ final class StringBackedTranslatableFlushSubscriber
         if ($this->debug && $this->pending) {
             // Log a couple of computed keys
             $sample = array_slice($this->pending, 0, 3, true);
-            $this->logger->debug('Babel key sample (STR)', ['sample' => array_keys($sample)]);
+//            $this->logger->debug('Babel key sample (STR)', ['sample' => array_keys($sample)]);
         }
 
-        $this->logger->info('Babel onFlush collected', [
-            'entities' => $collected,
-            'pending'  => \count($this->pending),
-            'texts'    => \count($this->pendingWithText),
-        ]);
+//        $this->logger->info('Babel onFlush collected', [
+//            'entities' => $collected,
+//            'pending'  => \count($this->pending),
+//            'texts'    => \count($this->pendingWithText),
+//        ]);
     }
 
     public function postFlush(PostFlushEventArgs $args): void
@@ -163,17 +165,17 @@ final class StringBackedTranslatableFlushSubscriber
                 }
             }
             if ($this->debug) {
-                $this->logger->debug('Babel phase complete: TR upserts', ['count' => \count($this->pendingWithText)]);
+//                $this->logger->debug('Babel phase complete: TR upserts', ['count' => \count($this->pendingWithText)]);
             }
 
             if ($started) {
                 $conn->commit();
             }
 
-            $this->logger->info('Babel postFlush finished', [
-                'str'      => \count($this->pending),
-                'tr_texts' => \count($this->pendingWithText),
-            ]);
+//            $this->logger->info('Babel postFlush finished', [
+//                'str'      => \count($this->pending),
+//                'tr_texts' => \count($this->pendingWithText),
+//            ]);
         } catch (\Throwable $e) {
             if ($started && $conn->isTransactionActive()) {
                 $conn->rollBack();

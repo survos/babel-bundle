@@ -14,7 +14,8 @@ final class HashUtil
 
     public static function calcTranslationKey(string $sourceHash, string $targetLocale, ?string $engine=null)
     {
-        assert(!$engine);
+//        assert(!$engine);
+        $engine = null; // @todo: decide on keys!!
         return sprintf('%s-%s%s', $sourceHash, $targetLocale, $engine ? "-$engine" : '');
     }
 

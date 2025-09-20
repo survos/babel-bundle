@@ -9,6 +9,7 @@ use Doctrine\DBAL\ParameterType;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
+use Survos\BabelBundle\Contract\BabelHooksInterface;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\BabelBundle\Util\HashUtil;
@@ -31,18 +32,17 @@ final class BabelPostLoadHydrator
     public function postLoad(PostLoadEventArgs $args): void
     {
         $em     = $args->getObjectManager();
+        /** @var BabelHooksInterface $entity */
         $entity = $args->getObject();
         $class  = $entity::class;
+
+        if (!$entity instanceof BabelHooksInterface) {
+            return;
+        }
 
         // Only entities registered in the index
         $fields = $this->index->fieldsFor($class);
         if ($fields === []) {
-            return;
-        }
-
-        // Need the hook API to get the *backing* (original) values
-        if (!\method_exists($entity, 'getBackingValue')) {
-            $this->logger->warning('Babel Hydrator: entity missing hooks API; skipping.', ['class' => $class]);
             return;
         }
 
@@ -75,9 +75,9 @@ final class BabelPostLoadHydrator
                 $entity->tCodes = $codes;
             }
 
-            $this->logger->debug('Babel Hydrator STR key', [
-                'class' => $class, 'field' => $field, 'src' => $srcLocale, 'hash' => $strHash
-            ]);
+//            $this->logger->debug('Babel Hydrator STR key', [
+//                'class' => $class, 'field' => $field, 'src' => $srcLocale, 'hash' => $strHash
+//            ]);
         }
 
         if ($fieldToStrHash === []) {

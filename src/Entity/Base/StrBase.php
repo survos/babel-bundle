@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Entity\Base;
 
+use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Runtime\BabelRuntime;
 
@@ -13,7 +14,7 @@ abstract class StrBase
     #[ORM\Column(length: 64)]
     public string $hash;                 // deterministic key (e.g., xxh3 of srcLocale + context + original)
 
-    #[ORM\Column(type: 'text')]
+    #[ORM\Column(type: Types::TEXT)]
     public string $original;             // source string (untranslated)
 
     #[ORM\Column(length: 8)]
@@ -22,7 +23,7 @@ abstract class StrBase
     #[ORM\Column(length: 128, nullable: true)]
     public ?string $context = null;      // optional domain/context
 
-    #[ORM\Column(type: 'json', nullable: true)]
+    #[ORM\Column(type: Types::JSON, nullable: true, options: ['jsonb' => true])]
     public ?array $meta = null;
 
     #[ORM\Column]
@@ -39,7 +40,7 @@ abstract class StrBase
      * Per-locale status map, e.g. {"es":"queued","fr":"translated"}.
      * Use to avoid re-dispatching already-complete locales at scale.
      */
-    #[ORM\Column(type: 'json', nullable: true)]
+    #[ORM\Column(type: Types::JSON, nullable: true, options: ['jsonb' => true])]
     public ?array $localeStatuses = null;
 
     // ----- Property hooks (computed helpers) -----

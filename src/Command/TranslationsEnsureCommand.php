@@ -71,17 +71,25 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
             foreach ($iter as $str) {
                 /** @var object $str */
                 $seen++;
-                if (!\is_string($str->hash) || $str->hash === '') continue;
+                /** @var string $strHash */
+                $strHash = $str->hash ?? '';
+                if ($strHash === '') {
+                    continue;
+                }
 
                 // Exists?
                 $exists = (bool) $trRepo->createQueryBuilder('t')
                     ->select('t.hash')
-                    ->andWhere('t.hash = :h AND t.locale = :l')
-                    ->setParameter('h', $str->hash)
+                    ->andWhere('t.strHash = :sh AND t.locale = :l')
+                    ->setParameter('sh', $strHash)
                     ->setParameter('l', $locale)
                     ->setMaxResults(1)
-                    ->getQuery()->getOneOrNullResult();
-                if ($exists) continue;
+                    ->getQuery()
+                    ->getOneOrNullResult();
+
+                if ($exists) {
+                    continue;
+                }
 
                 if (!$dryRun) {
                     $tr = new $trClass(
