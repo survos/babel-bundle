@@ -17,7 +17,6 @@ use Survos\BabelBundle\Runtime\BabelRuntime;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\BabelBundle\Util\HashUtil;
-use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 #[AsDoctrineListener(event: Events::onFlush)]
 #[AsDoctrineListener(event: Events::postFlush)]
@@ -27,10 +26,8 @@ final class StringBackedTranslatableFlushSubscriber
         private readonly LoggerInterface $logger,
         private readonly LocaleContext $locale,
         private readonly TranslatableIndex $index,
-//        #[Autowire('%kernel.debug%')]
         private readonly bool $debug = false,
-    ) {
-    }
+    ) {}
 
     /** @var array<string, array{original:string, src:string}> keyed by STR.hash */
     private array $pending = [];
@@ -46,22 +43,9 @@ final class StringBackedTranslatableFlushSubscriber
         $em  = $args->getObjectManager();
         $uow = $em->getUnitOfWork();
 
-        $collected = 0;
         foreach (array_merge($uow->getScheduledEntityInsertions(), $uow->getScheduledEntityUpdates()) as $entity) {
-            $collected += $this->collectFromEntity($entity, 'onFlush');
+            $this->collectFromEntity($entity, 'onFlush');
         }
-
-        if ($this->debug && $this->pending) {
-            // Log a couple of computed keys
-            $sample = array_slice($this->pending, 0, 3, true);
-//            $this->logger->debug('Babel key sample (STR)', ['sample' => array_keys($sample)]);
-        }
-
-//        $this->logger->info('Babel onFlush collected', [
-//            'entities' => $collected,
-//            'pending'  => \count($this->pending),
-//            'texts'    => \count($this->pendingWithText),
-//        ]);
     }
 
     public function postFlush(PostFlushEventArgs $args): void
@@ -80,15 +64,10 @@ final class StringBackedTranslatableFlushSubscriber
 
         // SQL per platform
         $sqlStr      = $this->buildSqlStr($pf, $strTable, $nowFn);
-        $sqlTrEnsure = $this->buildSqlTrEnsure($pf, $trTable, $nowFn); // (str_hash, locale) conflict
-        $sqlTrUpsert = $this->buildSqlTrUpsert($pf, $trTable, $nowFn); // (str_hash, locale) conflict
-
-        if ($this->debug) {
-            $this->logSqliteDiagnostics($conn, $pf, $strTable, $trTable);
-        }
+        $sqlTrEnsure = $this->buildSqlTrEnsure($pf, $trTable, $nowFn); // ignore ANY conflict
+        $sqlTrUpsert = $this->buildSqlTrUpsert($pf, $trTable, $nowFn); // upsert by PK (hash)
 
         $locales = $this->locale->getEnabled() ?: [$this->locale->getDefault()];
-        \assert($locales !== [], 'Babel: enabled locales must not be empty');
 
         $started = false;
         try {
@@ -101,20 +80,15 @@ final class StringBackedTranslatableFlushSubscriber
             foreach ($this->pending as $strHash => $row) {
                 $this->executeStrUpsert($conn, $pf, $sqlStr, $strTable, $nowFn, $strHash, $row['original'], $row['src']);
             }
-            if ($this->debug) {
-                $this->logger->debug('Babel phase complete: STR upserts', ['count' => \count($this->pending)]);
-            }
 
-            // Phase 2: TR ensure (stubs) using correct TR key convention
-            $trKeySamples = [];
+            // Phase 2: TR ensure (stubs) — use ON CONFLICT DO NOTHING (no target!)
             foreach ($this->pending as $strHash => $_) {
                 foreach ($locales as $loc) {
-                    $loc    = (string)$loc;
-                    $trHash = HashUtil::calcTranslationKey($strHash, $loc);
+                    $trHash = HashUtil::calcTranslationKey($strHash, (string)$loc);
                     $params = [
-                        'hash'     => $trHash,    // TR PK (convention: "<strHash>-<locale>")
-                        'str_hash' => $strHash,   // for conflict key + query convenience
-                        'locale'   => $loc,
+                        'hash'     => $trHash,
+                        'str_hash' => $strHash,
+                        'locale'   => (string)$loc,
                     ];
                     try {
                         $conn->executeStatement($sqlTrEnsure, $params);
@@ -125,22 +99,10 @@ final class StringBackedTranslatableFlushSubscriber
                             $this->logPhaseError('TR_ENSURE', $sqlTrEnsure, $params, $e);
                         }
                     }
-                    if ($this->debug && \count($trKeySamples) < 3) {
-                        $trKeySamples[] = $params;
-                    }
                 }
             }
-            if ($this->debug && $trKeySamples) {
-                $this->logger->debug('Babel key sample (TR)', ['sample' => $trKeySamples]);
-            }
-            if ($this->debug) {
-                $this->logger->debug('Babel phase complete: TR ensure', [
-                    'strs' => \count($this->pending),
-                    'locales' => \count($locales)
-                ]);
-            }
 
-            // Phase 3: TR upserts (texts), same TR key convention
+            // Phase 3: TR upserts (text) — upsert by PK (hash)
             foreach ($this->pendingWithText as $r) {
                 $strHash = $r['str_hash'];
                 $loc     = $r['locale'];
@@ -164,18 +126,10 @@ final class StringBackedTranslatableFlushSubscriber
                     }
                 }
             }
-            if ($this->debug) {
-//                $this->logger->debug('Babel phase complete: TR upserts', ['count' => \count($this->pendingWithText)]);
-            }
 
             if ($started) {
                 $conn->commit();
             }
-
-//            $this->logger->info('Babel postFlush finished', [
-//                'str'      => \count($this->pending),
-//                'tr_texts' => \count($this->pendingWithText),
-//            ]);
         } catch (\Throwable $e) {
             if ($started && $conn->isTransactionActive()) {
                 $conn->rollBack();
@@ -223,42 +177,54 @@ final class StringBackedTranslatableFlushSubscriber
 
     private function buildSqlTrEnsure(object $pf, string $trTable, string $nowFn): string
     {
+        // NOTE: Use DO NOTHING with NO TARGET to ignore ANY unique/PK conflict.
         if ($pf instanceof PostgreSQLPlatform) {
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                    ON CONFLICT (str_hash, locale) DO NOTHING";
+                    ON CONFLICT DO NOTHING";
         }
         if ($pf instanceof SqlitePlatform) {
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                    ON CONFLICT(str_hash, locale) DO NOTHING";
+                    ON CONFLICT DO NOTHING";
         }
+        // MySQL/MariaDB: a no-op update keeps semantics
         return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                 VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                ON DUPLICATE KEY UPDATE text = text";
+                ON DUPLICATE KEY UPDATE hash = hash";
     }
 
     private function buildSqlTrUpsert(object $pf, string $trTable, string $nowFn): string
     {
+        // Upsert by PRIMARY KEY (hash) to avoid arbiter ambiguity.
         if ($pf instanceof PostgreSQLPlatform) {
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
-                    ON CONFLICT (str_hash, locale) DO UPDATE
-                      SET text = EXCLUDED.text, updated_at = {$nowFn}";
+                    ON CONFLICT (hash) DO UPDATE
+                      SET text = EXCLUDED.text,
+                          str_hash = EXCLUDED.str_hash,
+                          locale = EXCLUDED.locale,
+                          updated_at = {$nowFn}";
         }
         if ($pf instanceof SqlitePlatform) {
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
-                    ON CONFLICT(str_hash, locale) DO UPDATE SET
-                      text = excluded.text, updated_at = {$nowFn}";
+                    ON CONFLICT(hash) DO UPDATE SET
+                      text = excluded.text,
+                      str_hash = excluded.str_hash,
+                      locale = excluded.locale,
+                      updated_at = {$nowFn}";
         }
         return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                 VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
                 ON DUPLICATE KEY UPDATE
-                  text = VALUES(text), updated_at = {$nowFn}";
+                  text = VALUES(text),
+                  str_hash = VALUES(str_hash),
+                  locale = VALUES(locale),
+                  updated_at = {$nowFn}";
     }
 
-    // === Exec helpers ========================================================
+    // === Exec helpers, collect, etc. (unchanged) =============================
 
     private function executeStrUpsert(
         Connection $conn,
@@ -281,12 +247,6 @@ final class StringBackedTranslatableFlushSubscriber
                 $upd = "UPDATE {$strTable}
                         SET original = :original, src_locale = :src, updated_at = {$nowFn}
                         WHERE hash = :hash";
-                if ($this->debug) {
-                    $this->logger->warning('Babel STR upsert fallback (SQLite)', [
-                        'hash' => $strHash,
-                        'reason' => $e->getMessage(),
-                    ]);
-                }
                 $conn->executeStatement($ins, $params);
                 $conn->executeStatement($upd, $params);
                 return;
@@ -309,18 +269,10 @@ final class StringBackedTranslatableFlushSubscriber
                 VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})";
         $upd = "UPDATE {$trTable}
                 SET text = :text, updated_at = {$nowFn}
-                WHERE str_hash = :str_hash AND locale = :locale";
-        if ($this->debug) {
-            $this->logger->warning('Babel TR upsert fallback (SQLite)', [
-                'str_hash' => $params['str_hash'] ?? null,
-                'locale'   => $params['locale'] ?? null,
-            ]);
-        }
+                WHERE hash = :hash";
         $conn->executeStatement($ins, $params);
         $conn->executeStatement($upd, $params);
     }
-
-    // === Collect / hashing ===================================================
 
     private function collectFromEntity(object $entity, string $phase): int
     {
@@ -336,7 +288,6 @@ final class StringBackedTranslatableFlushSubscriber
         }
 
         $srcLocale = $this->resolveSourceLocale($entity, $class);
-        \assert($srcLocale !== '', 'Babel: srcLocale must not be empty during hashing');
 
         $cfg      = $this->index->configFor($class);
         $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
@@ -349,19 +300,7 @@ final class StringBackedTranslatableFlushSubscriber
             }
             $context = $fieldCfg[$field]['context'] ?? null;
 
-            // Use *your* canonical source key
             $strHash = HashUtil::calcSourceKey($original, $srcLocale);
-
-            if ($this->debug) {
-                $this->logger->debug('Babel.collect', [
-                    'phase' => $phase,
-                    'class' => $class,
-                    'field' => $field,
-                    'src'   => $srcLocale,
-                    'ctx'   => $context,
-                    'hash'  => $strHash,
-                ]);
-            }
 
             $this->pending[$strHash] = [
                 'original' => $original,
@@ -406,8 +345,6 @@ final class StringBackedTranslatableFlushSubscriber
         return $this->locale->getDefault();
     }
 
-    // === Debug helpers =======================================================
-
     private function isSqliteConflictTargetError(\Throwable $e): bool
     {
         return \str_contains($e->getMessage(), 'ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint');
@@ -421,48 +358,5 @@ final class StringBackedTranslatableFlushSubscriber
             'sql'       => $sql,
             'params'    => $params,
         ]);
-    }
-
-    private function logSqliteDiagnostics(Connection $conn, object $pf, string $strTable, string $trTable): void
-    {
-        if (!$pf instanceof SqlitePlatform) {
-            return;
-        }
-        try {
-            $ver = $this->fetchOneScalar($conn, 'SELECT sqlite_version();');
-            $db  = $this->fetchAllRows($conn, 'PRAGMA database_list;');
-            $strIdx = $this->fetchAllRows($conn, "PRAGMA index_list('{$strTable}');");
-            $trIdx  = $this->fetchAllRows($conn, "PRAGMA index_list('{$trTable}');");
-            $strDDL = $this->fetchAllRows($conn,
-                "SELECT name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name = '{$strTable}' ORDER BY name;"
-            );
-            $trDDL = $this->fetchAllRows($conn,
-                "SELECT name, sql FROM sqlite_master WHERE type IN ('table','index') AND tbl_name = '{$trTable}' ORDER BY name;"
-            );
-
-            $this->logger->debug('Babel DB diagnostics', [
-                'platform' => $pf::class,
-                'sqlite_ver' => $ver,
-                'database_list' => $db,
-                'str.index_list' => $strIdx,
-                'tr.index_list'  => $trIdx,
-                'str.sqlite_master' => $strDDL,
-                'tr.sqlite_master'  => $trDDL,
-            ]);
-        } catch (\Throwable $e) {
-            $this->logger->warning('Babel diagnostics failed', ['error' => $e->getMessage()]);
-        }
-    }
-
-    /** @return list<array<string,mixed>> */
-    private function fetchAllRows(Connection $conn, string $sql): array
-    {
-        return $conn->executeQuery($sql)->fetchAllAssociative();
-    }
-
-    private function fetchOneScalar(Connection $conn, string $sql): ?string
-    {
-        $v = $conn->executeQuery($sql)->fetchOne();
-        return $v === false ? null : (string) $v;
     }
 }

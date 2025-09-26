@@ -11,6 +11,7 @@ use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Helper\ProgressBar;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
@@ -19,15 +20,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * Useful as a backfill if some strings predate the onFlush/postFlush upserter.
  */
 #[AsCommand('babel:translations:ensure', 'Ensure (hash, locale) rows exist in str_translation for target locale(s)')]
-final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
+final class TranslationsEnsureCommand
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly LoggerInterface $logger,
         private LocaleContext $localeContext,
-    ) {
-//        parent::__construct();
-    }
+    ) {}
 
     public function __invoke(
         SymfonyStyle $io,
@@ -41,17 +40,16 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
         #[Option('Str entity FQCN')] string $strClass = 'App\\Entity\\Str',
         #[Option('StrTranslation entity FQCN')] string $trClass = 'App\\Entity\\StrTranslation',
     ): int {
-//        $this->applyLocaleOverride($input);
-
-//        $targets = $this->resolveTargetLocales($io, null, $all);
+        // Resolve targets (your LocaleContext already knows)
         $targets = $this->localeContext->getEnabled();
-
         if (!class_exists($strClass) || !class_exists($trClass)) {
             $io->error('Str/StrTranslation classes not found. Adjust --str-class/--tr-class.');
-            return 1;
+            return Command::FAILURE;
         }
 
         $grandCreated = 0;
+        $grandExists  = 0;
+        $grandSeen    = 0;
 
         foreach ($targets as $locale) {
             $io->section("Locale: {$locale}");
@@ -59,26 +57,61 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
             $strRepo = $this->em->getRepository($strClass);
             $trRepo  = $this->em->getRepository($trClass);
 
-            $qb = $strRepo->createQueryBuilder('s');
+            // Build the same base query we will iterate
+            $baseQb = $strRepo->createQueryBuilder('s');
             if ($source !== null) {
-                $qb->andWhere('s.srcLocale = :src')->setParameter('src', $source);
+                $baseQb->andWhere('s.srcLocale = :src')->setParameter('src', $source);
             }
-            if ($limit > 0) $qb->setMaxResults($limit);
 
-            $iter = $qb->getQuery()->toIterable();
-            $created = 0; $seen = 0;
+            // Compute accurate total (respecting --source)
+            $countQb = clone $baseQb;
+            $total = (int) $countQb->select('COUNT(s.hash)')->getQuery()->getSingleScalarResult();
+            if ($limit > 0) {
+                $total = min($total, $limit);
+            }
+
+            if ($total === 0) {
+                $io->note('No source rows match filters for this locale.');
+                continue;
+            }
+
+            // Prepare the iterator for actual processing
+            if ($limit > 0) {
+                $baseQb->setMaxResults($limit);
+            }
+            $iter = $baseQb->getQuery()->toIterable();
+
+            // Counters
+            $created = 0;
+            $exists  = 0;
+            $seen    = 0;
+
+            $progressBar = new ProgressBar($io, $total);
+
+            $progressBar->setRedrawFrequency(200);
+            $progressBar->setFormat(
+                ' %current%/%max% [%bar%] %percent:3s%%  • seen:%message1%  created:%message2%  exists:%message3%'
+            );
+            $progressBar->setMessage('0', 'message1');
+            $progressBar->setMessage('0', 'message2');
+            $progressBar->setMessage('0', 'message3');
 
             foreach ($iter as $str) {
                 /** @var object $str */
-                $seen++;
+                ++$seen;
                 /** @var string $strHash */
                 $strHash = $str->hash ?? '';
                 if ($strHash === '') {
+                    $progressBar->advance();
+                    $progressBar->setMessage((string) $seen, 'message1');
+                    $progressBar->setMessage((string) $created, 'message2');
+                    $progressBar->setMessage((string) $exists, 'message3');
+                    if ($limit > 0 && $seen >= $limit) { break; }
                     continue;
                 }
 
-                // Exists?
-                $exists = (bool) $trRepo->createQueryBuilder('t')
+                // Exists?  (check by UNIQUE(str_hash, locale))
+                $already = (bool) $trRepo->createQueryBuilder('t')
                     ->select('t.hash')
                     ->andWhere('t.strHash = :sh AND t.locale = :l')
                     ->setParameter('sh', $strHash)
@@ -87,31 +120,35 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
                     ->getQuery()
                     ->getOneOrNullResult();
 
-                if ($exists) {
-                    continue;
+                if ($already) {
+                    ++$exists;
+                } else {
+                    if (!$dryRun) {
+                        $tr = new $trClass(
+                            HashUtil::calcTranslationKey($strHash, $locale),
+                            $strHash,
+                            $locale,
+                            null
+                        );
+                        $this->em->persist($tr);
+                    }
+                    ++$created;
+
+                    if (!$dryRun && ($created % $batchSize) === 0) {
+                        $this->em->flush();
+                        $this->em->clear();
+                        // re-acquire after clear
+                        $strRepo = $this->em->getRepository($strClass);
+                        $trRepo  = $this->em->getRepository($trClass);
+                    }
                 }
 
-                if (!$dryRun) {
-                    $tr = new $trClass(
-                        HashUtil::calcTranslationKey($str->hash, $locale),
-                        $str->hash,
-                        $locale, null);
-                    // this happens in the constructor
-//                    $tr->updatedAt = new \DateTimeImmutable();
-                    $this->em->persist($tr);
-                }
+                $progressBar->advance();
+                $progressBar->setMessage((string) $seen, 'message1');
+                $progressBar->setMessage((string) $created, 'message2');
+                $progressBar->setMessage((string) $exists, 'message3');
 
-                $created++;
-
-                if (!$dryRun && ($created % $batchSize) === 0) {
-                    $this->em->flush();
-                    $this->em->clear();
-                    // re-acquire after clear
-                    $strRepo = $this->em->getRepository($strClass);
-                    $trRepo  = $this->em->getRepository($trClass);
-                }
-
-                if ($limit > 0 && $seen >= $limit) break;
+                if ($limit > 0 && $seen >= $limit) { break; }
             }
 
             if (!$dryRun) {
@@ -119,13 +156,22 @@ final class TranslationsEnsureCommand # extends Command # AbstractBabelCommand
                 $this->em->clear();
             }
 
+            $io->success(sprintf('Locale %s → seen %d, created %d, existed %d', $locale, $seen, $created, $exists));
+
             $grandCreated += $created;
-            $io->success(sprintf('Locale %s: created %d StrTranslation row(s).', $locale, $created));
+            $grandExists  += $exists;
+            $grandSeen    += $seen;
         }
 
-        $io->success(sprintf('Total created: %d', $grandCreated));
-        if ($dryRun) $io->note('Dry-run: no changes were written.');
-        return 0;
+        $io->writeln('');
+        $io->success(sprintf(
+            'All locales done → seen %d, created %d, existed %d%s',
+            $grandSeen,
+            $grandCreated,
+            $grandExists,
+            $dryRun ? ' (dry-run)' : ''
+        ));
+        return Command::SUCCESS;
     }
 
     /** @return list<string>|null */
