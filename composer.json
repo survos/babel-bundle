@@ -10,7 +10,7 @@
         "doctrine/orm": "^2.12 || ^3.3",
         "symfony/dependency-injection": "^7.3",
         "symfony/http-kernel": "^7.3",
-        "doctrine/doctrine-bundle": "^2.7",
+        "doctrine/doctrine-bundle": "^2.7|^3.0",
         "symfony/property-access": "^7.3",
         "symfony/translation": "^7.3",
         "symfony/console": "^7.3",
