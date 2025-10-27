@@ -8,12 +8,12 @@
         "ext-intl": "*",
         "ext-mbstring": "*",
         "doctrine/orm": "^2.12 || ^3.3",
-        "symfony/dependency-injection": "^7.3",
-        "symfony/http-kernel": "^7.3",
+        "symfony/dependency-injection": "^7.3||^8.0",
+        "symfony/http-kernel": "^7.3||^8.0",
         "doctrine/doctrine-bundle": "^2.7|^3.0",
-        "symfony/property-access": "^7.3",
+        "symfony/property-access": "^7.3||^8.0",
         "symfony/translation": "^7.3",
-        "symfony/console": "^7.3",
+        "symfony/console": "^7.3||^8.0",
         "doctrine/persistence": "^4.1"
     },
     "require-dev": {
