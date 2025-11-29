@@ -23,9 +23,9 @@ final class BabelAddCommand implements SignalableCommandInterface
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Entity class (FQCN or short, e.g. App\\Entity\\Article or Article)')] string $entity,
-        #[Argument('Property name to add (e.g. bio)')] string $field,
-        #[Option('Use TEXT instead of STRING')] bool $text = false,
+        #[Argument('Entity class (FQCN or short, e.g. App\\Entity\\Article or Article)')] ?string $entity=null,
+        #[Argument('Property name to add (e.g. bio)')] ?string $field=null,
+        #[Option('Use TEXT instead of STRING')] ?bool $text = null,
         #[Option('Optional translation context (e.g. "article")')] ?string $context = null,
         #[Option('Optional human description for translators')] ?string $description = null,
         #[Option('Show diff but do not write file')] bool $dry = false,
@@ -33,10 +33,20 @@ final class BabelAddCommand implements SignalableCommandInterface
         #[Option('Make the backing column nullable')] bool $nullable = true,
         #[Option('Length for STRING (ignored for TEXT)')] int $length = 255,
         #[Option('Custom anchor comment name (fallbacks to built-in anchors)')] ?string $marker = null,
-        #[Option('Also scaffold Str/StrTranslation (+ repos) in App if missing')] bool $scaffold = false,
+        #[Option('Also scaffold Str/StrTranslation (+ repos) in App if missing')] ?bool $scaffold = null,
         #[Option('Interactive mode (prompt for missing info)')] bool $interactive = false,
     ): int {
         $io->title('Babel Add (property hooks)');
+
+        if ($scaffold) {
+            $this->maybeScaffoldStr($io);
+            if (empty($entity)) {
+                return Command::SUCCESS;
+            }
+        }
+
+
+
 
         if ($interactive) {
             if (!\str_contains($entity, '\\')) {
@@ -71,9 +81,6 @@ final class BabelAddCommand implements SignalableCommandInterface
             return Command::FAILURE;
         }
 
-        if ($scaffold) {
-            $this->maybeScaffoldStr($io);
-        }
 
         $refl = new ReflectionClass($entityFqcn);
         if (!$refl->isUserDefined()) {

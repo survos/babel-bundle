@@ -180,6 +180,7 @@ final class TranslateCommand
                     $this->em->clear();
                     $strRepo = $this->em->getRepository($strClass);
                     $trRepo  = $this->em->getRepository($trClass);
+                    $io->success(sprintf('Locale %s: processed %d row(s).', $targetLocale, $done));
                 }
             }
 

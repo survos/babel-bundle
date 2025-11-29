@@ -32,6 +32,7 @@ final class BabelDebugSchemaCommand
         ];
 
         foreach ($targets as $t) {
+//            $count = $this->em->getR
             $name  = $t['name'];
             $table = $t['table'];
 
@@ -48,7 +49,8 @@ final class BabelDebugSchemaCommand
 
             $m = $metas[0];
 
-            $io->writeln(sprintf('Entity: <info>%s</info>', $m->getName()));
+            $io->writeln(sprintf('Entity: <info>%s count: %d</info>',
+                $m->getName(), $this->em->getRepository($m->getName())->count()));
             $io->writeln(sprintf('Identifiers: <comment>%s</comment>', implode(', ', $m->getIdentifierFieldNames())));
 
             $rows = [];
