@@ -1,17 +1,19 @@
 <?php
 declare(strict_types=1);
 
-namespace Survos\BabelBundle\Tests\Fixtures\Entity;
+namespace Survos\BabelBundle\Tests\App\Entity;
 
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
+use Survos\BabelBundle\Contract\BabelHooksInterface;
+use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 use Survos\BabelBundle\Traits\BabelTranslatableAttrTrait;
 
 #[BabelStorage(StorageMode::Property)]
-class SimpleOwner
+class SimpleOwner implements BabelHooksInterface
 {
-    use BabelTranslatableAttrTrait;
+    use BabelHooksTrait;
 
     private string $label_raw = '';
     private ?string $description_raw = null;

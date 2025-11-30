@@ -1,19 +1,20 @@
 <?php
 declare(strict_types=1);
 
-namespace Survos\BabelBundle\Tests\Fixtures\Entity;
+namespace Survos\BabelBundle\Tests\App\Entity;
 
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
-use Survos\BabelBundle\Traits\BabelTranslatableAttrTrait;
+use Survos\BabelBundle\Contract\BabelHooksInterface;
+use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 
 #[ORM\Entity]
 #[BabelStorage(StorageMode::Property)]
-class TestOwner
+class TestOwner implements BabelHooksInterface
 {
-    use BabelTranslatableAttrTrait;
+    use BabelHooksTrait;
 
     #[ORM\Id]
     #[ORM\GeneratedValue]
