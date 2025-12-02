@@ -13,9 +13,11 @@ use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
+use Symfony\Component\Console\Attribute\Ask;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -31,10 +33,18 @@ final class TranslateCommand
         private readonly ?ExternalTranslatorBridge $bridge = null, // soft dep; may be null
     ) {}
 
+    public function getEnabledLocales(): array
+    {
+        return $this->localeContext->getEnabled();
+
+    }
+
     public function __invoke(
         SymfonyStyle $io,
         InputInterface $input,
-        #[Argument('Target locales (comma-delimited) or empty to use --all')] ?string $localesArg = null,
+        #[Argument()]
+//        #[Argument(suggestedValues: [self::class, 'getSuggestedEnabledLocales']), Ask('Enter the locale name')]
+        ?string $localesArg=null,
         #[Option('Use all framework.enabled_locales when locales argument is empty')] bool $all = false,
         #[Option('Limit number to translate per locale (0 = unlimited)')] int $limit = 0,
         #[Option('batch flush')] int $batch = 10,
@@ -44,6 +54,9 @@ final class TranslateCommand
         #[Option('StrTranslation entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrTranslationBase)')] string $trClass  = 'App\\Entity\\StrTranslation',
         #[Option('Override *source* locale when Str.srcLocale is null')] ?string $srcLocaleOverride = null,
     ): int {
+        if (!$localesArg) {
+            $localesArg = $io->askQuestion(new ChoiceQuestion("To which locale?", $this->getEnabledLocales()));
+        }
         // Optional global source-locale override for this run
         if ($srcLocaleOverride) {
             $this->localeContext->set($srcLocaleOverride);
@@ -52,6 +65,7 @@ final class TranslateCommand
         // Resolve target locales
         $targets = $this->resolveTargetLocales($io, $localesArg, $all);
         if ($targets === null) {
+            $io->warning("No target locales found.");
             return Command::FAILURE;
         }
 

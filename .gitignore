@@ -4,3 +4,5 @@ composer.lock
 /tests/project-dir
 # coverage
 /html
+
+tests/App/var

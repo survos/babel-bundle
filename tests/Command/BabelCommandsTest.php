@@ -8,9 +8,9 @@ use PHPUnit\Framework\Attributes\Test;
 use Survos\BabelBundle\Command\BabelScanCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Tests\App\Entity\TestOwner;
+use Survos\BabelBundle\Tests\KernelTestCase;
 use Survos\BabelBundle\Tests\TestCase\DbTestCaseTrait;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
-use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
 
 final class BabelCommandsTest extends KernelTestCase
@@ -30,6 +30,7 @@ final class BabelCommandsTest extends KernelTestCase
         $this->createSchema($em);
     }
 
+
     #[Test]
     public function carriers_command_lists_property_mode_entities(): void
     {
@@ -45,7 +46,7 @@ final class BabelCommandsTest extends KernelTestCase
     #[Test]
     public function scan_command_outputs_fields_and_caches_map(): void
     {
-        $cmd = $this->app->find('babel:scan:translatables');
+        $cmd = $this->app->find('babel:scan');
         $tester = new CommandTester($cmd);
         $tester->execute([]);
 

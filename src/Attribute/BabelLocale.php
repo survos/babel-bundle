@@ -13,8 +13,11 @@ use Attribute;
  *   #[BabelLocale] public ?string $srcLocale = null;
  *   #[BabelLocale] public function getSourceLocale(): ?string { ... }
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_PROPERTY)]
+#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_PROPERTY | Attribute::TARGET_CLASS)]
 final class BabelLocale
 {
-    public function __construct(public string $format = 'iso-8859-1') {}
+    public function __construct(
+        public string $format = 'iso-8859-1',
+        public ?string $locale = null, // if set on the class level, always get it from there.
+    ) {}
 }

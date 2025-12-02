@@ -27,7 +27,8 @@ final class BabelPostLoadHydrator
         private readonly TranslatableIndex $index,
         private readonly LocaleContext $locale,
         private readonly LoggerInterface $logger
-    ) {}
+    ) {
+    }
 
     public function postLoad(PostLoadEventArgs $args): void
     {
@@ -87,8 +88,8 @@ final class BabelPostLoadHydrator
         // Fetch translations for the display locale by (str_hash, locale)
         $conn = $em->getConnection();
         $rows = $conn->executeQuery(
-            'SELECT str_hash, text 
-               FROM str_translation 
+            'SELECT str_hash, text
+               FROM str_translation
               WHERE str_hash IN (?) AND locale = ?',
             [\array_values($fieldToStrHash), $displayLocale],
             [ArrayParameterType::STRING, ParameterType::STRING]

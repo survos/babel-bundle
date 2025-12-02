@@ -64,9 +64,9 @@ final class LocaleContext
     {
         $prev = $this->current;
         $this->set($locale);
-        return $fn();
-        try { return $fn(); }
-        finally {
+        try {
+            return $fn();
+        } finally {
             $this->apply($prev ?? $this->default, 'restore');
         }
     }

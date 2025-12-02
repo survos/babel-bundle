@@ -54,6 +54,7 @@ final class SurvosBabelBundle extends AbstractBundle
         }
 
 
+
         $builder->register(StringBackedTranslatableFlushSubscriber::class)
             ->setAutowired(true)
             ->setAutoconfigured(true)
