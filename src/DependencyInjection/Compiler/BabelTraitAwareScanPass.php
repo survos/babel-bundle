@@ -7,7 +7,6 @@ use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
-use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 
@@ -21,6 +20,15 @@ use Symfony\Component\DependencyInjection\ContainerBuilder;
  *     survos_babel.scan_roots:
  *       '%kernel.project_dir%/src': 'App'
  *       '%kernel.project_dir%/packages/pixie-bundle/src': 'Survos\PixieBundle'
+ *
+ * Map shape (per FQCN):
+ *   [
+ *     'fields'         => [ fieldName => ['context' => ?string], ... ],
+ *     'localeAccessor' => ['type'=>'prop'|'method','name'=>string,'format'=>?string] | null,
+ *     'sourceLocale'   => ?string,        // from #[BabelLocale(locale: ...)]
+ *     'targetLocales'  => ?array<string>, // from #[BabelLocale(targetLocales: [...])]
+ *     'hasTCodes'      => bool,
+ *   ]
  */
 final class BabelTraitAwareScanPass implements CompilerPassInterface
 {
@@ -42,11 +50,13 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             if (!\is_dir($dir)) {
                 continue;
             }
+
             foreach ($this->scanPhpFiles($dir) as $file) {
                 $fqcn = $this->classFromFile($file, $dir, $prefix);
                 if (!$fqcn || !\class_exists($fqcn)) {
                     continue;
                 }
+
                 $this->maybeIndexClass($index, $fqcn);
             }
         }
@@ -54,12 +64,11 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         \ksort($index);
         $container->setParameter('survos_babel.translatable_index', $index);
 
-// Prefer constructor injection:
+        // Prefer constructor injection:
         if ($container->hasDefinition(\Survos\BabelBundle\Service\TranslatableIndex::class)) {
             $def = $container->getDefinition(\Survos\BabelBundle\Service\TranslatableIndex::class);
             $def->setArgument('$map', $index);
         }
-
     }
 
     /** @return iterable<string> */
@@ -68,6 +77,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         $it = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($baseDir, \FilesystemIterator::SKIP_DOTS)
         );
+
         /** @var \SplFileInfo $f */
         foreach ($it as $f) {
             if ($f->isFile() && $f->getExtension() === 'php') {
@@ -79,113 +89,227 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
     private function classFromFile(string $file, string $baseDir, string $prefix): ?string
     {
         $rel = \ltrim(\str_replace('\\', '/', \substr($file, \strlen($baseDir))), '/');
-        if (!\str_ends_with($rel, '.php')) return null;
+        if (!\str_ends_with($rel, '.php')) {
+            return null;
+        }
+
         return $prefix . '\\' . \str_replace('/', '\\', \substr($rel, 0, -4));
     }
 
+    /**
+     * @param array<string, array> $index
+     */
     private function maybeIndexClass(array &$index, string $fqcn): void
     {
-        try { $rc = new \ReflectionClass($fqcn); } catch (\Throwable) { return; }
-        if ($rc->isAbstract() || $rc->isTrait()) return;
+        try {
+            $rc = new \ReflectionClass($fqcn);
+        } catch (\Throwable) {
+            return;
+        }
 
-        $storageAttr = $rc->getAttributes(\Survos\BabelBundle\Attribute\BabelStorage::class)[0] ?? null;
-        if (!$storageAttr || $storageAttr->newInstance()->mode !== \Survos\BabelBundle\Attribute\StorageMode::Property) {
+        if ($rc->isAbstract() || $rc->isTrait()) {
+            return;
+        }
+
+        $storageAttr = $rc->getAttributes(BabelStorage::class)[0] ?? null;
+        if (!$storageAttr || $storageAttr->newInstance()->mode !== StorageMode::Property) {
             return;
         }
 
         $props = $this->collectPropsRecursive($rc);
 
-        // Translatable fields
+        // ---------------------------------------------------------------------
+        // 1) Translatable fields
+        // ---------------------------------------------------------------------
         $fields = [];
         foreach ($props as $entry) {
-            $p = $entry['prop'];
+            $p     = $entry['prop'];
             $attrs = $p->getAttributes(Translatable::class);
-            if (!$attrs) continue;
+            if (!$attrs) {
+                continue;
+            }
+
             $meta = $attrs[0]->newInstance();
-            $fields[$p->getName()] = ['context' => $meta->name ?? null];
+            $fields[$p->getName()] = [
+                'context' => $meta->name ?? null,
+            ];
         }
 
-        // Locale accessor via #[BabelLocale] on property or method
+        // ---------------------------------------------------------------------
+        // 2) Locale config: accessor + fixed source + target locales
+        // ---------------------------------------------------------------------
         $localeAccessor = null;
+        $sourceLocale   = null;
+        $targetLocales  = null;
 
-        // properties first
-        foreach ($props as $entry) {
-            $p = $entry['prop'];
-            $attrs = $p->getAttributes(BabelLocale::class);
-            if ($attrs) {
-                $fmt = $attrs[0]->newInstance()->format ?? null;
-                $localeAccessor = ['type' => 'prop', 'name' => $p->getName(), 'format' => $fmt];
+        // 2a) Class-level #[BabelLocale(...)]
+        $classAttrs = $rc->getAttributes(BabelLocale::class);
+        if ($classAttrs !== []) {
+            /** @var BabelLocale $meta */
+            $meta          = $classAttrs[0]->newInstance();
+            $sourceLocale  = $meta->locale ?: null;
+            $targetLocales = $meta->targetLocales;
+            // format could be stored too if we ever need class-level formatting hints
+        }
+
+        // 2b) Property-level #[BabelLocale(...)] (including traits)
+        if ($localeAccessor === null) {
+            foreach ($props as $entry) {
+                $p     = $entry['prop'];
+                $attrs = $p->getAttributes(BabelLocale::class);
+                if (!$attrs) {
+                    continue;
+                }
+
+                /** @var BabelLocale $meta */
+                $meta = $attrs[0]->newInstance();
+
+                $localeAccessor = [
+                    'type'   => 'prop',
+                    'name'   => $p->getName(),
+                    'format' => $meta->format ?? null,
+                ];
+
+                if ($meta->locale) {
+                    $sourceLocale = $meta->locale;
+                }
+                if ($meta->targetLocales !== null) {
+                    $targetLocales = $meta->targetLocales;
+                }
+
                 break;
             }
         }
-        // methods next (on this class only; not traits)
-        if (!$localeAccessor) {
+
+        // 2c) Method-level #[BabelLocale(...)] (only on the class itself)
+        if ($localeAccessor === null) {
             foreach ($rc->getMethods() as $m) {
                 $attrs = $m->getAttributes(BabelLocale::class);
-                if ($attrs) {
-                    $fmt = $attrs[0]->newInstance()->format ?? null;
-                    $localeAccessor = ['type' => 'method', 'name' => $m->getName(), 'format' => $fmt];
-                    break;
+                if (!$attrs) {
+                    continue;
                 }
+
+                /** @var BabelLocale $meta */
+                $meta = $attrs[0]->newInstance();
+
+                $localeAccessor = [
+                    'type'   => 'method',
+                    'name'   => $m->getName(),
+                    'format' => $meta->format ?? null,
+                ];
+
+                if ($meta->locale) {
+                    $sourceLocale = $meta->locale;
+                }
+                if ($meta->targetLocales !== null) {
+                    $targetLocales = $meta->targetLocales;
+                }
+
+                break;
             }
         }
-        // fallback heuristic
-        if (!$localeAccessor) {
+
+        // 2d) Fallback heuristic for accessor (no extra metadata)
+        if ($localeAccessor === null) {
             foreach (['srcLocale', 'sourceLocale'] as $n) {
                 if ($rc->hasProperty($n)) {
-                    $localeAccessor = ['type' => 'prop', 'name' => $n, 'format' => null];
+                    $localeAccessor = [
+                        'type'   => 'prop',
+                        'name'   => $n,
+                        'format' => null,
+                    ];
                     break;
                 }
             }
         }
 
-        if (!$fields && !$localeAccessor) return;
+        // If nothing is translatable and no locale info, skip.
+        if ($fields === [] && $localeAccessor === null && $sourceLocale === null && $targetLocales === null) {
+            return;
+        }
 
         $index[$fqcn] = [
             'fields'         => $fields,
             'localeAccessor' => $localeAccessor,
+            'sourceLocale'   => $sourceLocale,
+            'targetLocales'  => $targetLocales,
             'hasTCodes'      => false,
         ];
     }
 
-
-    /** @return array<array{name:string, prop:\ReflectionProperty}> */
+    /**
+     * @return array<array{name:string, prop:\ReflectionProperty}>
+     */
     private function collectPropsRecursive(\ReflectionClass $rc): array
     {
         $out = [];
         foreach ($rc->getProperties() as $p) {
-            $out[] = ['name' => $p->getName(), 'prop' => $p];
+            $out[] = [
+                'name' => $p->getName(),
+                'prop' => $p,
+            ];
         }
+
         foreach ($this->collectTraitsRecursive($rc) as $t) {
             foreach ($t->getProperties() as $p) {
-                $out[] = ['name' => $p->getName(), 'prop' => $p];
+                $out[] = [
+                    'name' => $p->getName(),
+                    'prop' => $p,
+                ];
             }
         }
+
         if ($parent = $rc->getParentClass()) {
             $out = \array_merge($out, $this->collectPropsRecursive($parent));
         }
+
         return $out;
     }
 
-    /** @return \ReflectionClass[] */
+    /**
+     * @return \ReflectionClass[]
+     */
     private function collectTraitsRecursive(\ReflectionClass $rc): array
     {
-        $seen = []; $out = []; $stack = $rc->getTraits();
+        $seen  = [];
+        $out   = [];
+        $stack = $rc->getTraits();
+
         while ($stack) {
-            $t = \array_pop($stack);
+            $t    = \array_pop($stack);
             $name = $t->getName();
-            if (isset($seen[$name])) continue;
+
+            if (isset($seen[$name])) {
+                continue;
+            }
+
             $seen[$name] = true;
-            $out[] = $t;
-            foreach ($t->getTraits() as $tt) $stack[] = $tt;
+            $out[]       = $t;
+
+            foreach ($t->getTraits() as $tt) {
+                $stack[] = $tt;
+            }
         }
+
         return $out;
     }
 
     private function classUsesTraitRecursive(\ReflectionClass $rc, string $traitFqcn): bool
     {
-        foreach ($rc->getTraitNames() as $t) if ($t === $traitFqcn) return true;
-        foreach ($rc->getTraits() as $tRc) if ($this->classUsesTraitRecursive($tRc, $traitFqcn)) return true;
-        return ($parent = $rc->getParentClass()) ? $this->classUsesTraitRecursive($parent, $traitFqcn) : false;
+        foreach ($rc->getTraitNames() as $t) {
+            if ($t === $traitFqcn) {
+                return true;
+            }
+        }
+
+        foreach ($rc->getTraits() as $tRc) {
+            if ($this->classUsesTraitRecursive($tRc, $traitFqcn)) {
+                return true;
+            }
+        }
+
+        return ($parent = $rc->getParentClass())
+            ? $this->classUsesTraitRecursive($parent, $traitFqcn)
+            : false;
     }
 }

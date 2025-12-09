@@ -7,6 +7,7 @@ use Survos\BabelBundle\Cache\TranslatableMapWarmer;
 use Survos\BabelBundle\Command\BabelBrowseCommand;
 use Survos\BabelBundle\Command\BabelDebugSchemaCommand;
 use Survos\BabelBundle\Command\BabelPreviewCommand;
+use Survos\BabelBundle\Command\BabelStatsCommand;
 use Survos\BabelBundle\Command\BabelTranslatableDumpCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Command\TranslatableIndexCommand;
@@ -91,6 +92,12 @@ return static function (ContainerConfigurator $c): void {
 
     }
     $s->set(TranslationsEnsureCommand::class)
+        ->autoconfigure()
+//        ->arg('$registry', service('doctrine'))
+//        ->arg('$router', service(StringStorageRouter::class))
+        ->tag('console.command');
+
+    $s->set(BabelStatsCommand::class)
         ->autoconfigure()
 //        ->arg('$registry', service('doctrine'))
 //        ->arg('$router', service(StringStorageRouter::class))

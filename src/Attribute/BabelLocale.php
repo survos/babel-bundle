@@ -19,5 +19,6 @@ final class BabelLocale
     public function __construct(
         public string $format = 'iso-8859-1',
         public ?string $locale = null, // if set on the class level, always get it from there.
+        public ?array $targetLocales = null, // if null, use enabled locales.  Can also be [] meaning no translations
     ) {}
 }

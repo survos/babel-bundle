@@ -53,7 +53,23 @@ final class SurvosBabelBundle extends AbstractBundle
             $builder->setParameter('kernel.enabled_locales', []); // or ['en']
         }
 
+        $builder->register(BabelPostLoadHydrator::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false)
+            ->addTag('doctrine.event_listener', ['event' => Events::postLoad]);
 
+        // ensure a safe fallback if the framework param isn't defined
+        if (!$builder->hasParameter('kernel.enabled_locales')) {
+            $builder->setParameter('kernel.enabled_locales', []);
+        }
+
+        // Use doctrine.event_subscriber so Doctrine calls getSubscribedEvents()
+        $builder->register(StringBackedTranslatableFlushSubscriber::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false)
+            ->addTag('doctrine.event_subscriber');
 
         $builder->register(StringBackedTranslatableFlushSubscriber::class)
             ->setAutowired(true)
