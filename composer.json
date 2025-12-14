@@ -14,7 +14,8 @@
         "symfony/property-access": "^7.3||^8.0",
         "symfony/translation": "^7.3||^8.0",
         "symfony/console": "^7.3||^8.0",
-        "doctrine/persistence": "^4.1"
+        "doctrine/persistence": "^4.1",
+        "survos/lingua-contracts": "dev-main"
     },
     "require-dev": {
         "roave/security-advisories": "dev-latest",
