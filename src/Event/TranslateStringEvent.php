@@ -13,5 +13,7 @@ final class TranslateStringEvent extends Event
         public string $sourceLocale,
         public string $targetLocale,
         public ?string $translated = null, // listener sets this
-    ) {}
+    ) {
+//        assert(false, "If we use this, it should be moved to contracts.  Otherwise, remove it.");
+    }
 }

@@ -72,9 +72,7 @@ final class BabelCommandsTest extends KernelTestCase
         // Run translate to es
         $cmd = $this->app->find('babel:translate');
         $tester = new CommandTester($cmd);
-        $tester->execute([
-            'locale' => 'es',
-            '--class' => TestOwner::class,
+        $tester->execute(['--class' => TestOwner::class,
             '--only-missing' => true,
         ]);
 

@@ -12,7 +12,7 @@ use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 
 #[ORM\Entity]
 #[BabelStorage(StorageMode::Property)]
-class TestOwner implements BabelHooksInterface
+final class TestOwner implements BabelHooksInterface
 {
     use BabelHooksTrait;
 
@@ -21,33 +21,16 @@ class TestOwner implements BabelHooksInterface
     #[ORM\Column]
     public ?int $id = null;
 
-    // Backing fields (source-locale)
-    #[ORM\Column(type: 'text')]
-    private string $label_raw = '';
+    // Doctrine persists the backing field; the hook property is virtual and must not be mapped.
+    #[ORM\Column(name: 'label', length: 255)]
+    public string $labelBacking = '';
 
-    #[ORM\Column(type: 'text', nullable: true)]
-    private ?string $description_raw = null;
-
-    // Per-locale blob storage
-    #[ORM\Column(type: 'json', nullable: true)]
-    private ?array $i18n_raw = null;
-
-    public function getSourceLocale(): ?string { return 'en'; }
-    protected function &i18nStorage(): array { $this->i18n_raw ??= []; return $this->i18n_raw; }
-
-    // Public properties with hooks
     #[Translatable]
     public string $label {
-        get => $this->label_raw;
-        set => $this->label_raw = $value;
+        get => $this->resolveTranslatable('label', $this->labelBacking);
+        set {
+            $this->labelBacking = $value;
+            $this->setResolvedTranslation('label', $value);
+        }
     }
-
-    #[Translatable]
-    public ?string $description {
-        get => $this->description_raw;
-        set => $this->description_raw = $value;
-    }
-
-    // Expose i18n for asserts (test-only helper)
-    public function _i18n(): array { return $this->i18n_raw ?? []; }
 }

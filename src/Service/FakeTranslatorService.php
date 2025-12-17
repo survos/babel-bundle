@@ -209,7 +209,7 @@ class FakeTranslatorService
         'hand' => 'mano',
         'part' => 'parte',
         'place' => 'lugar',
-        'work' => 'trabajo',
+        'work(noun)' => 'trabajo', // @todo: add context
         'week' => 'semana',
         'case' => 'caso',
         'point' => 'punto',

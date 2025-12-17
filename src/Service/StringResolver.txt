@@ -1,0 +1,148 @@
+<?php
+declare(strict_types=1);
+
+namespace Survos\BabelBundle\Service;
+
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\Connection;
+use Doctrine\Persistence\ManagerRegistry;
+
+/**
+ * Read-only helpers for Str / StrTranslation using DBAL + metadata.
+ *
+ * Assumes entities exist:
+ *  - \App\Entity\Str
+ *  - \App\Entity\StrTranslation
+ *
+ * Uses metadata to resolve table/column names.
+ */
+final class StringResolver
+{
+    public function __construct(private readonly ManagerRegistry $registry) {}
+
+    /**
+     * @return array<string, array{original:string, src:string, context:?string}>
+     */
+    public function getStrRowsByHashes(array $hashes, ?string $emName = null): array
+    {
+        $hashes = $this->normalizeHashes($hashes);
+        if ($hashes === []) {
+            return [];
+        }
+
+        $em   = $this->registry->getManager($emName);
+        $conn = $em->getConnection();
+
+        $meta     = $em->getClassMetadata(\App\Entity\Str::class);
+        $table    = $meta->getTableName();
+        $colHash  = $meta->getColumnName('hash');
+        $colOrig  = $meta->getColumnName('original');
+        $colSrc   = $meta->getColumnName('srcLocale'); // your field name
+        $colCtx   = $meta->hasField('context') ? $meta->getColumnName('context') : null;
+
+        $platform = $conn->getDatabasePlatform();
+        $q = static fn(string $ident) => $platform->quoteIdentifier($ident);
+
+        // Note: we can safely alias even if context doesn't exist by selecting NULL AS ctx
+        $selectCtx = $colCtx ? $q($colCtx) : 'NULL';
+
+        $sql = sprintf(
+            'SELECT %s AS hash, %s AS original, %s AS src, %s AS ctx
+             FROM %s
+             WHERE %s IN (:hashes)',
+            $q($colHash),
+            $q($colOrig),
+            $q($colSrc),
+            $selectCtx,
+            $q($table),
+            $q($colHash),
+        );
+
+        $rows = $conn->executeQuery(
+            $sql,
+            ['hashes' => $hashes],
+            ['hashes' => ArrayParameterType::STRING]
+        )->fetchAllAssociative();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $hash = (string) ($r['hash'] ?? '');
+            if ($hash === '') {
+                continue;
+            }
+            $out[$hash] = [
+                'original' => (string) ($r['original'] ?? ''),
+                'src'      => (string) ($r['src'] ?? ''),
+                'context'  => ($r['ctx'] !== null) ? (string) $r['ctx'] : null,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, array<string,string|null>> map[hash][locale] = text|null
+     */
+    public function getTranslationsForHashes(array $hashes, ?string $emName = null): array
+    {
+        $hashes = $this->normalizeHashes($hashes);
+        if ($hashes === []) {
+            return [];
+        }
+
+        $em   = $this->registry->getManager($emName);
+        $conn = $em->getConnection();
+
+        $meta    = $em->getClassMetadata(\App\Entity\StrTranslation::class);
+        $table   = $meta->getTableName();
+        $colHash = $meta->getColumnName('hash');
+        $colLoc  = $meta->getColumnName('locale');
+        $colText = $meta->getColumnName('text');
+
+        $platform = $conn->getDatabasePlatform();
+        $q = static fn(string $ident) => $platform->quoteIdentifier($ident);
+
+        $sql = sprintf(
+            'SELECT %s AS hash, %s AS locale, %s AS text
+             FROM %s
+             WHERE %s IN (:hashes)',
+            $q($colHash),
+            $q($colLoc),
+            $q($colText),
+            $q($table),
+            $q($colHash),
+        );
+
+        $rows = $conn->executeQuery(
+            $sql,
+            ['hashes' => $hashes],
+            ['hashes' => ArrayParameterType::STRING]
+        )->fetchAllAssociative();
+
+        $out = [];
+        foreach ($rows as $r) {
+            $h = (string) ($r['hash'] ?? '');
+            $l = (string) ($r['locale'] ?? '');
+            if ($h === '' || $l === '') {
+                continue;
+            }
+            $t = $r['text']; // may be NULL
+            $out[$h][$l] = \is_string($t) ? $t : null;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function normalizeHashes(array $hashes): array
+    {
+        $hashes = array_map('strval', $hashes);
+        $hashes = array_map('trim', $hashes);
+        $hashes = array_filter($hashes, static fn(string $h) => $h !== '');
+        $hashes = array_values(array_unique($hashes));
+
+        return $hashes;
+    }
+}

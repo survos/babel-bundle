@@ -112,9 +112,15 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         }
 
         $storageAttr = $rc->getAttributes(BabelStorage::class)[0] ?? null;
-        if (!$storageAttr || $storageAttr->newInstance()->mode !== StorageMode::Property) {
+        // @todo: figure out pixie
+//        if (!$storageAttr || $storageAttr->newInstance()->mode !== StorageMode::Property) {
+//            return;
+//        }
+
+        if (!$storageAttr) {
             return;
         }
+
 
         $props = $this->collectPropsRecursive($rc);
 

@@ -17,32 +17,24 @@ use Survos\BabelBundle\Attribute\Translatable;
 use Survos\BabelBundle\Runtime\BabelRuntime;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
-use Survos\BabelBundle\Util\HashUtil;
+use Survos\Lingua\Core\Identity\HashUtil;
 
 /**
  * Collects string-backed translatable values during onFlush and writes them
- * into STR + STR_TRANSLATION tables during postFlush.
+ * into STR + STR_TRANSLATION tables during postFlush using DBAL upserts.
+ *
+ * Notes:
+ * - STR.hash is a source key (text+source locale) via lingua-core HashUtil
+ * - STR_TRANSLATION.hash is a translation key namespace'd with a fixed engine
+ *   (because Babel storage schema does not have an engine column)
  */
 final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
 {
-    public function __construct(
-        private readonly LoggerInterface $logger,
-        private readonly LocaleContext $locale,
-        private readonly TranslatableIndex $index,
-        private readonly bool $debug = false,
-    ) {
-    }
-
     /**
-     * @return string[]
+     * Fixed namespace used to derive STR_TRANSLATION.hash.
+     * This avoids schema changes while keeping deterministic keys.
      */
-    public function getSubscribedEvents(): array
-    {
-        return [
-            Events::onFlush,
-            Events::postFlush,
-        ];
-    }
+    public const BABEL_ENGINE = 'babel';
 
     /**
      * @var array<string, array{
@@ -56,6 +48,23 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
     /** @var list<array{str_hash:string, locale:string, text:string}> */
     private array $pendingWithText = [];
 
+    private bool $inPostFlush = false;
+
+    public function __construct(
+        private readonly LoggerInterface $logger,
+        private readonly LocaleContext $locale,
+        private readonly TranslatableIndex $index,
+        private readonly bool $debug = false,
+    ) {}
+
+    /**
+     * @return string[]
+     */
+    public function getSubscribedEvents(): array
+    {
+        return [Events::onFlush, Events::postFlush];
+    }
+
     public function onFlush(OnFlushEventArgs $args): void
     {
         $this->pending         = [];
@@ -67,18 +76,14 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $insertions = $uow->getScheduledEntityInsertions();
         $updates    = $uow->getScheduledEntityUpdates();
 
-        // Always log something so we know this is wired
-        $this->logger->info('Babel onFlush: starting collection', [
-            'insertions' => \count($insertions),
-            'updates'    => \count($updates),
-        ]);
-
         foreach (\array_merge($insertions, $updates) as $entity) {
             $this->collectFromEntity($entity, 'onFlush');
         }
 
         if ($this->debug) {
-            $this->logger->info('Babel onFlush: collection summary', [
+            $this->logger->debug('Babel onFlush: collected', [
+                'insertions'  => \count($insertions),
+                'updates'     => \count($updates),
                 'pending_str' => \count($this->pending),
                 'pending_tr'  => \count($this->pendingWithText),
             ]);
@@ -87,18 +92,16 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
 
     public function postFlush(PostFlushEventArgs $args): void
     {
-        // Again, always log so we can see the subscriber firing
-        $this->logger->info('Babel postFlush: invoked', [
-            'pending_str' => \count($this->pending),
-            'pending_tr'  => \count($this->pendingWithText),
-        ]);
-
-        if ($this->pending === [] && $this->pendingWithText === []) {
-            if ($this->debug) {
-                $this->logger->info('Babel postFlush: nothing pending, skipping.');
-            }
+        if ($this->inPostFlush) {
+            // Defensive: avoid re-entrancy surprises.
             return;
         }
+
+        if ($this->pending === [] && $this->pendingWithText === []) {
+            return;
+        }
+
+        $this->inPostFlush = true;
 
         $em   = $args->getObjectManager();
         $conn = $em->getConnection();
@@ -107,14 +110,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $strTable = BabelRuntime::STRING_TABLE;       // 'str'
         $trTable  = BabelRuntime::TRANSLATION_TABLE;  // 'str_translation'
         $nowFn    = $pf instanceof SqlitePlatform ? 'CURRENT_TIMESTAMP' : 'NOW()';
-
-        if ($this->debug) {
-            $this->logger->info('Babel postFlush: preparing SQL', [
-                'str_table'   => $strTable,
-                'tr_table'    => $trTable,
-                'db_platform' => $pf::class,
-            ]);
-        }
 
         $sqlStr      = $this->buildSqlStr($pf, $strTable, $nowFn);
         $sqlTrEnsure = $this->buildSqlTrEnsure($pf, $trTable, $nowFn);
@@ -147,22 +142,21 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 $targetLocales = $row['targetLocales'] ?? null;
 
                 if ($targetLocales === []) {
-                    if ($this->debug) {
-                        $this->logger->info('Babel TR_ENSURE: skipping (targetLocales=[])', [
-                            'str_hash' => $strHash,
-                        ]);
-                    }
                     continue;
                 }
 
                 $locales = $targetLocales ?? ($this->locale->getEnabled() ?: [$this->locale->getDefault()]);
 
-                foreach ($locales as $loc) {
-                    $trHash = HashUtil::calcTranslationKey($strHash, (string) $loc);
+                foreach ($locales as $locRaw) {
+                    $loc = HashUtil::normalizeLocale((string) $locRaw);
+
+                    // IMPORTANT: babel schema has no engine column; use a fixed namespace
+                    $trHash = HashUtil::calcTranslationKey($strHash, $loc, self::BABEL_ENGINE);
+
                     $params = [
                         'hash'     => $trHash,
                         'str_hash' => $strHash,
-                        'locale'   => (string) $loc,
+                        'locale'   => $loc,
                     ];
 
                     try {
@@ -180,8 +174,9 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             // Phase 3: TR upserts (text)
             foreach ($this->pendingWithText as $r) {
                 $strHash = $r['str_hash'];
-                $loc     = $r['locale'];
-                $trHash  = HashUtil::calcTranslationKey($strHash, $loc);
+                $loc     = HashUtil::normalizeLocale($r['locale']);
+
+                $trHash  = HashUtil::calcTranslationKey($strHash, $loc, self::BABEL_ENGINE);
 
                 $params = [
                     'hash'     => $trHash,
@@ -206,24 +201,25 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 $conn->commit();
             }
 
-            if ($this->debug) {
-                $this->logger->info('Babel postFlush: completed successfully', [
-                    'str_rows' => \count($this->pending),
-                    'tr_rows'  => \count($this->pendingWithText),
-                ]);
-            }
+            // One useful production log line when we actually wrote something.
+            $this->logger->info('Babel postFlush: persisted translatable strings', [
+                'str_rows' => \count($this->pending),
+                'tr_rows'  => \count($this->pendingWithText),
+                'platform' => $pf::class,
+            ]);
         } catch (\Throwable $e) {
             if ($started && $conn->isTransactionActive()) {
                 $conn->rollBack();
             }
 
-            $this->logger->error('Babel postFlush failed (global)', [
+            $this->logger->error('Babel postFlush failed', [
                 'exception' => $e::class,
                 'message'   => $e->getMessage(),
             ]);
         } finally {
             $this->pending         = [];
             $this->pendingWithText = [];
+            $this->inPostFlush      = false;
         }
     }
 
@@ -275,6 +271,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                     ON CONFLICT DO NOTHING";
         }
 
+        // MySQL/MariaDB no-op update to satisfy INSERT when unique exists
         return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                 VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
                 ON DUPLICATE KEY UPDATE hash = hash";
@@ -286,9 +283,9 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
                     ON CONFLICT (hash) DO UPDATE
-                      SET text      = EXCLUDED.text,
-                          str_hash  = EXCLUDED.str_hash,
-                          locale    = EXCLUDED.locale,
+                      SET text       = EXCLUDED.text,
+                          str_hash   = EXCLUDED.str_hash,
+                          locale     = EXCLUDED.locale,
                           updated_at = {$nowFn}";
         }
 
@@ -296,22 +293,22 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                     VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
                     ON CONFLICT(hash) DO UPDATE SET
-                      text      = excluded.text,
-                      str_hash  = excluded.str_hash,
-                      locale    = excluded.locale,
+                      text       = excluded.text,
+                      str_hash   = excluded.str_hash,
+                      locale     = excluded.locale,
                       updated_at = {$nowFn}";
         }
 
         return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                 VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
                 ON DUPLICATE KEY UPDATE
-                  text      = VALUES(text),
-                  str_hash  = VALUES(str_hash),
-                  locale    = VALUES(locale),
+                  text       = VALUES(text),
+                  str_hash   = VALUES(str_hash),
+                  locale     = VALUES(locale),
                   updated_at = {$nowFn}";
     }
 
-    // === Exec helpers, collect, etc. =========================================
+    // === Exec helpers ========================================================
 
     private function executeStrUpsert(
         Connection $conn,
@@ -353,7 +350,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
     {
         $ins = "INSERT OR IGNORE INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
                 VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})";
-
         $conn->executeStatement($ins, $params);
     }
 
@@ -366,52 +362,48 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 WHERE hash = :hash";
 
         $conn->executeStatement($ins, $params);
+        $conn->executeStatement($upd, $params);
     }
+
+    // === Collection ==========================================================
 
     private function collectFromEntity(object $entity, string $phase): int
     {
         $class = $entity::class;
 
-        if ($this->debug) {
-            $this->logger->info('Babel collect: inspecting entity', [
-                'class' => $class,
-                'phase' => $phase,
-            ]);
-        }
-
-        // 1) Try compile-time index
         $fields = $this->index->fieldsFor($class);
 
-        // 2) Fallback: runtime attribute scan
         if ($fields === []) {
             $fields = $this->discoverTranslatableFieldsFallback($entity);
-
-            if ($this->debug) {
-                $this->logger->info('Babel collect: fallback attribute scan', [
-                    'class'       => $class,
-                    'field_count' => \count($fields),
-                    'fields'      => $fields,
-                ]);
-            }
-
             if ($fields === []) {
                 return 0;
             }
         }
 
         if (!\method_exists($entity, 'getBackingValue')) {
-            $this->logger->warning('Babel collect: entity missing hooks API; skipping.', [
-                'class' => $class,
-                'phase' => $phase,
-            ]);
-
+            if ($this->debug) {
+                $this->logger->debug('Babel collect: entity missing getBackingValue(); skipping', [
+                    'class' => $class,
+                    'phase' => $phase,
+                ]);
+            }
             return 0;
         }
 
-        $srcLocale    = $this->resolveSourceLocale($entity, $class);
+        $srcLocale    = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
         $cfg          = $this->index->configFor($class) ?? [];
-        $fieldCfg     = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
         $classTargets = $cfg['targetLocales'] ?? null;
+
+        $this->logger->info('Babel source locale resolution', [
+            'class'        => $class,
+            'phase'        => $phase,
+            'resolved'     => $srcLocale,
+            'babel_locale' => $cfg['sourceLocale'] ?? null,
+            'targets'      => $classTargets,
+            'default'      => $this->locale->getDefault(),
+            'enabled'      => $this->locale->getEnabled(),
+        ]);
+
 
         $count = 0;
 
@@ -421,8 +413,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 continue;
             }
 
-            $context = $fieldCfg[$field]['context'] ?? null;
-
             $strHash = HashUtil::calcSourceKey($original, $srcLocale);
 
             $this->pending[$strHash] = [
@@ -431,52 +421,27 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 'targetLocales' => $classTargets,
             ];
 
-            if ($this->debug) {
-                $this->logger->info('Babel collect: queued STR row', [
-                    'class'     => $class,
-                    'field'     => $field,
-                    'srcLocale' => $srcLocale,
-                    'str_hash'  => $strHash,
-                    'context'   => $context,
-                ]);
-            }
-
-            // pending TR with explicit text
+            // Optional: include explicit target text overrides if entity provides them
             if (\property_exists($entity, '_pendingTranslations') && \is_array($entity->_pendingTranslations ?? null)) {
                 $pairs = $entity->_pendingTranslations[$field] ?? null;
 
                 if (\is_array($pairs)) {
                     foreach ($pairs as $loc => $txt) {
-                        if (!\is_string($loc) || !\is_string($txt) || $txt === '') {
+                        $loc = HashUtil::normalizeLocale((string) $loc);
+                        if ($loc === '' || !\is_string($txt) || $txt === '') {
                             continue;
                         }
 
                         $this->pendingWithText[] = [
                             'str_hash' => $strHash,
-                            'locale'   => (string) $loc,
+                            'locale'   => $loc,
                             'text'     => $txt,
                         ];
-
-                        if ($this->debug) {
-                            $this->logger->info('Babel collect: queued TR row with text', [
-                                'class'    => $class,
-                                'field'    => $field,
-                                'locale'   => $loc,
-                                'str_hash' => $strHash,
-                            ]);
-                        }
                     }
                 }
             }
 
             $count++;
-        }
-
-        if ($this->debug && $count === 0) {
-            $this->logger->info('Babel collect: no non-empty strings found on entity', [
-                'class' => $class,
-                'phase' => $phase,
-            ]);
         }
 
         return $count;
@@ -529,8 +494,11 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         return $out;
     }
 
+    // === Logging / sqlite quirks ============================================
+
     private function isSqliteConflictTargetError(\Throwable $e): bool
     {
+        // When SQLite doesn't have a unique/PK on the conflict target it throws this.
         return \str_contains(
             $e->getMessage(),
             'ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint'

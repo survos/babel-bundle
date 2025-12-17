@@ -8,9 +8,9 @@ use Survos\BabelBundle\DependencyInjection\Compiler\BabelCarrierScanPass;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelTraitAwareScanPass;
 use Survos\BabelBundle\EventListener\BabelPostLoadHydrator;
 use Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber;
-use Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber;
-use Survos\BabelBundle\Service\StringResolver;
-use Survos\CodeBundle\Service\DirectEntityTranslatableUpdater;
+//use Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber;
+//use Survos\BabelBundle\Service\StringResolver;
+//use Survos\CodeBundle\Service\DirectEntityTranslatableUpdater;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -26,12 +26,13 @@ final class SurvosBabelBundle extends AbstractBundle
     {
         $container->import(\dirname(__DIR__).'/config/services.php');
 
-        foreach ([StringResolver::class, BabelLocaleRequestSubscriber::class] as $class) {
-            $builder->register($class)
-                ->setAutowired(true)
-                ->setAutoconfigured(true)
-                ->setPublic(true);
-        }
+        // old, hopefully deletable!
+//        foreach ([StringResolver::class, BabelLocaleRequestSubscriber::class] as $class) {
+//            $builder->register($class)
+//                ->setAutowired(true)
+//                ->setAutoconfigured(true)
+//                ->setPublic(true);
+//        }
 
         // Fallback namespaces the compiler passes can use if Doctrine mappings/params aren't available.
         if (!$builder->hasParameter('survos_babel.scan_namespaces')) {

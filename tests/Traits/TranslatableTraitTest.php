@@ -5,25 +5,27 @@ namespace Survos\BabelBundle\Tests\Traits;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
-use Survos\BabelBundle\Tests\Fixtures\Entity\SimpleOwner;
+use Survos\BabelBundle\Tests\App\Entity\SimpleOwner;
 
 final class TranslatableTraitTest extends TestCase
 {
     #[Test]
-    public function it_stores_and_reads_translations(): void
+    public function it_uses_backing_values_when_runtime_locale_is_not_initialized(): void
     {
         $o = new SimpleOwner();
         $o->label = 'Museum of Things';
         $o->description = 'A place with stuff.';
 
-        self::assertSame('Museum of Things', $o->getText('label', 'en'));
-        self::assertSame('A place with stuff.', $o->getText('description', 'en'));
+        // Without a BabelRuntime locale, property hooks must return source/backing values.
+        self::assertSame('Museum of Things', $o->label);
+        self::assertSame('A place with stuff.', $o->description);
 
-        $o->setText('description', 'es', 'Un lugar con cosas.');
-        self::assertSame('Un lugar con cosas.', $o->getText('description', 'es'));
+        // Listener-facing accessor must follow <field>Backing convention
+        self::assertSame('Museum of Things', $o->getBackingValue('label'));
+        self::assertSame('A place with stuff.', $o->getBackingValue('description'));
 
-        $i18n = $o->_i18n();
-        self::assertArrayHasKey('description', $i18n);
-        self::assertArrayHasKey('es', $i18n['description']);
+        // Runtime cache helpers (used by hydrator)
+        $o->setResolvedTranslation('label', 'Museo de Cosas');
+        self::assertSame('Museo de Cosas', $o->getResolvedTranslation('label'));
     }
 }

@@ -60,15 +60,15 @@ return static function (ContainerConfigurator $c): void {
 
 
     // Router: EXPLICIT constructor args so we never rely on interface autowiring
-    $s->set(StringStorageRouter::class)
-        ->arg('$code', service(CodeStorage::class))
-        ->arg('$property', service(PropertyStorage::class))
-        ->public();
-
-    // Other services
-    $s->set(StringResolver::class)
-        ->arg('$registry', service('doctrine'))
-        ->public();
+//    $s->set(StringStorageRouter::class)
+//        ->arg('$code', service(CodeStorage::class))
+//        ->arg('$property', service(PropertyStorage::class))
+//        ->public();
+//
+//    // Other services
+//    $s->set(StringResolver::class)
+//        ->arg('$registry', service('doctrine'))
+//        ->public();
 
     $s->set(CarrierRegistry::class)
         ->arg('$doctrine', service('doctrine'))

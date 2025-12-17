@@ -14,7 +14,9 @@ final class StringStorageRouter
         private readonly CodeStorage $code,
         private readonly PropertyStorage $property,
         private readonly TranslatableIndex $index,
-    ) {}
+    ) {
+        assert(false, "This is probably no longer needed, let's come up with a better way");
+    }
 
     /** Choose a storage for the given carrier. */
     public function storageFor(object $carrier): StringStorage

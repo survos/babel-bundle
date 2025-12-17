@@ -8,7 +8,7 @@ use Doctrine\ORM\EntityManagerInterface;
 use Survos\BabelBundle\Runtime\BabelRuntime;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
-use Survos\BabelBundle\Util\HashUtil;
+use Survos\Lingua\Core\Identity\HashUtil;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;

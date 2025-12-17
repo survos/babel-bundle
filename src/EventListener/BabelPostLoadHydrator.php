@@ -12,13 +12,14 @@ use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Contract\BabelHooksInterface;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
-use Survos\BabelBundle\Util\HashUtil;
+use Survos\Lingua\Core\Identity\HashUtil;
 
 /**
  * PostLoad hydrator for string-backed translations.
  *
- * FIX: use the canonical STR key and look up TR rows by (str_hash, locale),
- * not by TR.primary-key. This matches our schema and HashUtil convention.
+ * Looks up TR rows by (str_hash, locale).
+ * IMPORTANT: If displayLocale === srcLocale, we MUST use the original/backing text
+ * and never query str_translation (no nl->nl "translation").
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
@@ -33,7 +34,6 @@ final class BabelPostLoadHydrator
     public function postLoad(PostLoadEventArgs $args): void
     {
         $em     = $args->getObjectManager();
-        /** @var BabelHooksInterface $entity */
         $entity = $args->getObject();
         $class  = $entity::class;
 
@@ -41,20 +41,33 @@ final class BabelPostLoadHydrator
             return;
         }
 
-        // Only entities registered in the index
         $fields = $this->index->fieldsFor($class);
         if ($fields === []) {
             return;
         }
 
-        $cfg      = $this->index->configFor($class);
-        $fieldCfg = \is_array($cfg['fields'] ?? null) ? $cfg['fields'] : [];
-
         // Source locale for hashing (NOT the request/display locale)
-        $srcLocale = $this->resolveSourceLocale($entity, $class);
+        $srcLocale = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
 
         // What we want to display right now
-        $displayLocale = $this->locale->get();
+        $displayLocale = HashUtil::normalizeLocale($this->locale->get());
+
+        assert(method_exists($entity, 'setResolvedTranslation'), "invalid entity, needs to implement BabelHooksInterface");
+
+
+        // If we're displaying the source locale, short-circuit: use backing/original values.
+        // No translation rows should exist for (str_hash, locale==srcLocale).
+        if ($displayLocale !== '' && $srcLocale !== '' && $displayLocale === $srcLocale) {
+            foreach ($fields as $field) {
+                $original = $entity->getBackingValue($field);
+                if (!\is_string($original) || $original === '') {
+                    continue;
+                }
+
+                    $entity->setResolvedTranslation($field, $original);
+            }
+            return;
+        }
 
         // Compute canonical STR hashes per field from backing + source locale
         $fieldToStrHash = [];
@@ -64,21 +77,16 @@ final class BabelPostLoadHydrator
                 continue;
             }
 
-            // NOTE: context no longer participates in key — HashUtil::calcSourceKey(original, src)
-            // If you need context in the key again, reintroduce it in HashUtil and here.
             $strHash = HashUtil::calcSourceKey($original, $srcLocale);
             $fieldToStrHash[$field] = $strHash;
 
             // Maintain tCodes if present (optional)
-            if (\property_exists($entity, 'tCodes')) {
-                $codes = (array)($entity->tCodes ?? []);
-                $codes[$field] = $strHash;
-                $entity->tCodes = $codes;
-            }
-
-//            $this->logger->debug('Babel Hydrator STR key', [
-//                'class' => $class, 'field' => $field, 'src' => $srcLocale, 'hash' => $strHash
-//            ]);
+            // this has been moved to a dedicated listener for array-backed translations.
+//            if (\property_exists($entity, 'tCodes')) {
+//                $codes = (array) ($entity->tCodes ?? []);
+//                $codes[$field] = $strHash;
+//                $entity->tCodes = $codes;
+//            }
         }
 
         if ($fieldToStrHash === []) {
@@ -97,15 +105,13 @@ final class BabelPostLoadHydrator
 
         $byStrHash = [];
         foreach ($rows as $r) {
-            $k = (string)($r['str_hash'] ?? '');
+            $k = (string) ($r['str_hash'] ?? '');
             $t = $r['text'] ?? null;
             if ($k !== '') {
                 $byStrHash[$k] = \is_string($t) ? $t : null;
             }
         }
 
-        // Fill the runtime cache used by property hooks
-        $setResolved = \method_exists($entity, 'setResolvedTranslation');
         foreach ($fieldToStrHash as $field => $strHash) {
             if (!\array_key_exists($strHash, $byStrHash)) {
                 $this->logger->warning('Babel hydration: no StrTranslation row found for (str_hash, locale)', [
@@ -117,23 +123,27 @@ final class BabelPostLoadHydrator
                 ]);
                 continue;
             }
+
             $text = $byStrHash[$strHash];
 
-            if ($setResolved) {
-                $entity->setResolvedTranslation($field, $text);
-            } else {
-                // last-resort stash
-                if (!\property_exists($entity, '_i18n') || !\is_array($entity->_i18n ?? null)) {
-                    $entity->_i18n = [];
+                if (!$text) {
+                    // we might not have a translation yet, so leave it as null so the fallback happens.  We could also tag this as __ to flag it.
+//                    $text = '__' . $field . '__NOT_TRANSLATED';
+                    continue;
+//                    dd($byStrHash, $field, $text, $strHash, $class, $displayLocale, $srcLocale);
                 }
-                $entity->_i18n[$displayLocale][$field] = $text;
-            }
+                $entity->setResolvedTranslation($field, $text);
         }
     }
 
-    /** Accessor defined in the compile-time index (prop/method) or fallback to default locale. */
+    /** Prefer compile-time class-level locale; then accessor; then default. */
     private function resolveSourceLocale(object $entity, string $class): string
     {
+        $cfg = $this->index->configFor($class) ?? [];
+        if (\is_string($cfg['sourceLocale'] ?? null) && $cfg['sourceLocale'] !== '') {
+            return $cfg['sourceLocale'];
+        }
+
         $acc = $this->index->localeAccessorFor($class);
         if ($acc) {
             if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
@@ -149,6 +159,7 @@ final class BabelPostLoadHydrator
                 }
             }
         }
+
         return $this->locale->getDefault();
     }
 }
