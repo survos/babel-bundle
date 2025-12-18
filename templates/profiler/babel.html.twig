@@ -1,0 +1,144 @@
+{% extends '@WebProfiler/Profiler/layout.html.twig' %}
+
+{% block toolbar %}
+    {% set types = collector.types %}
+    {% set count = 0 %}
+    {% for k,v in types %}{% set count = count + v %}{% endfor %}
+
+    {% set icon %}
+        <span class="sf-toolbar-value">Babel</span>
+        <span class="sf-toolbar-info-piece-additional-detail">
+            <span class="sf-toolbar-value">{{ count }}</span>
+        </span>
+    {% endset %}
+
+    {% set text %}
+        <div class="sf-toolbar-info-piece">
+            <b>Request locale</b>
+            <span>{{ collector.requestLocale }}</span>
+        </div>
+        <div class="sf-toolbar-info-piece">
+            <b>Default locale</b>
+            <span>{{ collector.defaultLocale }}</span>
+        </div>
+        {% for k,v in types %}
+            <div class="sf-toolbar-info-piece">
+                <b>{{ k }}</b>
+                <span>{{ v }}</span>
+            </div>
+        {% endfor %}
+    {% endset %}
+
+    {{ include('@WebProfiler/Profiler/toolbar_item.html.twig', { link: profiler_url, icon: icon, text: text }) }}
+{% endblock %}
+
+{% block menu %}
+    <span class="label">
+        <span class="icon">B</span>
+        <strong>Babel</strong>
+    </span>
+{% endblock %}
+
+{% block panel %}
+    <h2>Babel Debug</h2>
+
+    <div class="metrics">
+        <div class="metric">
+            <span class="value">{{ collector.requestLocale }}</span>
+            <span class="label">Request locale</span>
+        </div>
+        <div class="metric">
+            <span class="value">{{ collector.defaultLocale }}</span>
+            <span class="label">Default locale</span>
+        </div>
+    </div>
+
+    <h3>Events</h3>
+
+    {% if collector.events is empty %}
+        <div class="empty">No Babel events recorded for this request.</div>
+    {% else %}
+        <table class="table">
+            <thead>
+            <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Class</th>
+                <th>Id</th>
+                <th>Req</th>
+                <th>Babel</th>
+                <th>Effective</th>
+                <th>Fields</th>
+                <th>Hits</th>
+                <th>Missing</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for e in collector.events %}
+                {% set s = e.summary ?? {} %}
+                <tr>
+                    <td>{{ e.ts ?? '' }}</td>
+                    <td><code>{{ e.type ?? '' }}</code></td>
+                    <td>{{ e.class ?? '' }}</td>
+                    <td>{{ e.id ?? '' }}</td>
+                    <td>{{ e.request_locale ?? '' }}</td>
+                    <td>{{ e.babel_locale ?? '' }}</td>
+                    <td>{{ e.effective_locale ?? '' }}</td>
+                    <td>{{ e.field_count ?? (e.fields|length) }}</td>
+                    <td>{{ s.hits ?? '' }}</td>
+                    <td>{{ s.missing ?? '' }}</td>
+                </tr>
+
+                {% if e.fields is defined and e.fields %}
+                    <tr>
+                        <td colspan="10">
+                            <details>
+                                <summary>Show fields</summary>
+                                <p style="margin: 8px 0">
+                                    <strong>Babel locale source:</strong> {{ e.babel_locale_source ?? 'n/a' }}
+                                </p>
+                                <table class="table">
+                                    <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Value</th>
+                                        <th>Backing</th>
+                                        <th>Applied?</th>
+                                        <th>src_locale</th>
+                                        <th>str_hash</th>
+                                        <th>target</th>
+                                        <th>has row?</th>
+                                        <th>row text</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    {% for f in e.fields %}
+                                        <tr>
+                                            <td><code>{{ f.name }}</code></td>
+                                            <td><pre style="white-space: pre-wrap">{{ f.value is same as(null) ? 'NULL' : f.value }}</pre></td>
+                                            <td><pre style="white-space: pre-wrap">{{ f.backing is same as(null) ? 'NULL' : f.backing }}</pre></td>
+                                            <td>{{ f.applied is same as(null) ? 'n/a' : (f.applied ? 'yes' : 'no') }}</td>
+                                            <td><code>{{ f.src_locale ?? 'n/a' }}</code></td>
+                                            <td><code>{{ f.str_hash ?? 'n/a' }}</code></td>
+                                            <td><code>{{ f.target_locale ?? 'n/a' }}</code></td>
+                                            <td>
+                                                {% if f.has_translation is same as(null) %}
+                                                    n/a
+                                                {% else %}
+                                                    {{ f.has_translation ? 'yes' : 'no' }}
+                                                {% endif %}
+                                            </td>
+                                            <td><pre style="white-space: pre-wrap">{{ f.translated_text is same as(null) ? '' : f.translated_text }}</pre></td>
+                                        </tr>
+                                    {% endfor %}
+                                    </tbody>
+                                </table>
+                            </details>
+                        </td>
+                    </tr>
+                {% endif %}
+            {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

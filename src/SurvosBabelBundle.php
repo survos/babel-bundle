@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Survos\BabelBundle;
 
 use Doctrine\ORM\Events;
+use Survos\BabelBundle\DataCollector\BabelDataCollector;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelCarrierScanPass;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelTraitAwareScanPass;
 use Survos\BabelBundle\EventListener\BabelPostLoadHydrator;
@@ -11,6 +12,7 @@ use Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber;
 //use Survos\BabelBundle\EventSubscriber\BabelLocaleRequestSubscriber;
 //use Survos\BabelBundle\Service\StringResolver;
 //use Survos\CodeBundle\Service\DirectEntityTranslatableUpdater;
+use Survos\BabelBundle\Service\TargetLocaleResolver;
 use Symfony\Component\DependencyInjection\Compiler\PassConfig;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -41,6 +43,22 @@ final class SurvosBabelBundle extends AbstractBundle
                 'App\\Entity\\Translations\\',
             ]);
         }
+
+        foreach ([BabelDataCollector::class] as $class) {
+            $builder->register($class)
+                ->setAutowired(true)
+                ->setAutoconfigured(true)
+                ->setPublic(false);
+        }
+
+        if ((bool) $builder->getParameter('kernel.debug')) {
+            $container->import(\dirname(__DIR__).'/config/services_debug.php');
+        }
+
+        $builder->register(TargetLocaleResolver::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->setPublic(false);
 
         // --- Explicitly register Doctrine listeners (don’t rely on attributes/autodiscovery) ---
         $builder->register(BabelPostLoadHydrator::class)

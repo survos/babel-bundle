@@ -8,6 +8,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Translation\LocaleSwitcher;
+use Symfony\Contracts\Service\ResetInterface;
 use Symfony\Contracts\Translation\LocaleAwareInterface;
 
 /**
@@ -22,7 +23,7 @@ use Symfony\Contracts\Translation\LocaleAwareInterface;
  *   The write-side hashing should use class-level BabelLocale/accessor OR getDefault()
  *   (NOT the per-request get()). The per-request get() is display locale only.
  */
-final class LocaleContext
+final class LocaleContext implements ResetInterface
 {
     private ?string $current = null; // lazy-resolved; display/effective locale
 
@@ -79,6 +80,12 @@ final class LocaleContext
 
         return $this->current;
     }
+
+    public function reset(): void
+    {
+        $this->current = null;
+    }
+
 
     /**
      * Force/override for this run (CLI, explicit app rule).

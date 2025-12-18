@@ -13,7 +13,5 @@ final class BabelStorage
 {
         public function __construct(
             public StorageMode $mode=StorageMode::Property,
-            // if a const, we can include it here.
-            public ?string $sourceLocale=null,
         ) {}
 }

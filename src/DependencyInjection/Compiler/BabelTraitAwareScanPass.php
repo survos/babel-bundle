@@ -9,6 +9,8 @@ use Survos\BabelBundle\Attribute\StorageMode;
 use Survos\BabelBundle\Attribute\Translatable;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Survos\BabelBundle\Contract\BabelHooksInterface;
+use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 
 /**
  * Scans configured source roots for classes using #[BabelStorage(Property)]
@@ -119,6 +121,31 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
         if (!$storageAttr) {
             return;
+        }
+
+        // ---------------------------------------------------------------------
+// Contract validation: classes opting into #[BabelStorage] must support Babel hooks
+// ---------------------------------------------------------------------
+        if (!$rc->implementsInterface(BabelHooksInterface::class)) {
+            throw new \LogicException(sprintf(
+                'Class %s has #[%s] but does not implement %s. Add "implements %s" (and typically "use %s").',
+                $fqcn,
+                BabelStorage::class,
+                BabelHooksInterface::class,
+                BabelHooksInterface::class,
+                BabelHooksTrait::class
+            ));
+        }
+
+// Optional: enforce the trait as well (recommended, but you can relax this if needed)
+        if (!$this->classUsesTraitRecursive($rc, BabelHooksTrait::class)) {
+            throw new \LogicException(sprintf(
+                'Class %s implements %s but does not use %s. Add "use %s" to the entity.',
+                $fqcn,
+                BabelHooksInterface::class,
+                BabelHooksTrait::class,
+                BabelHooksTrait::class
+            ));
         }
 
 

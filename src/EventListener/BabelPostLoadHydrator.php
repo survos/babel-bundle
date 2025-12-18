@@ -52,6 +52,13 @@ final class BabelPostLoadHydrator
         // What we want to display right now
         $displayLocale = HashUtil::normalizeLocale($this->locale->get());
 
+        $this->logger->warning('BabelPostLoadHydrator locales', [
+            'class' => $class,
+            'srcLocale' => $srcLocale,
+            'displayLocale' => $displayLocale,
+            'requestLocale' => $this->locale->get(), // same call, but leave for clarity
+        ]);
+
         assert(method_exists($entity, 'setResolvedTranslation'), "invalid entity, needs to implement BabelHooksInterface");
 
 
@@ -64,8 +71,15 @@ final class BabelPostLoadHydrator
                     continue;
                 }
 
-                    $entity->setResolvedTranslation($field, $original);
+                $entity->setResolvedTranslation($field, $original);
             }
+            $this->logger->warning('BabelPostLoadHydrator locales', [
+                'class' => $class,
+                'srcLocale' => $srcLocale,
+                'displayLocale' => $displayLocale,
+                'requestLocale' => $this->locale->get(), // same call, but leave for clarity
+            ]);
+
             return;
         }
 
