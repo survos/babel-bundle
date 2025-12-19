@@ -10,6 +10,7 @@ use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Contract\BabelHooksInterface;
+use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\Lingua\Core\Identity\HashUtil;
@@ -17,9 +18,8 @@ use Survos\Lingua\Core\Identity\HashUtil;
 /**
  * PostLoad hydrator for string-backed translations.
  *
- * Looks up TR rows by (str_hash, locale).
- * IMPORTANT: If displayLocale === srcLocale, we MUST use the original/backing text
- * and never query str_translation (no nl->nl "translation").
+ * Looks up TR rows by (str_code, target_locale).
+ * IMPORTANT: If displayLocale === srcLocale, use the original/backing text and never query STR_TR.
  */
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
@@ -46,107 +46,84 @@ final class BabelPostLoadHydrator
             return;
         }
 
-        // Source locale for hashing (NOT the request/display locale)
         $srcLocale = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
-
-        // What we want to display right now
         $displayLocale = HashUtil::normalizeLocale($this->locale->get());
 
-        $this->logger->warning('BabelPostLoadHydrator locales', [
-            'class' => $class,
-            'srcLocale' => $srcLocale,
-            'displayLocale' => $displayLocale,
-            'requestLocale' => $this->locale->get(), // same call, but leave for clarity
-        ]);
-
-        assert(method_exists($entity, 'setResolvedTranslation'), "invalid entity, needs to implement BabelHooksInterface");
-
-
         // If we're displaying the source locale, short-circuit: use backing/original values.
-        // No translation rows should exist for (str_hash, locale==srcLocale).
         if ($displayLocale !== '' && $srcLocale !== '' && $displayLocale === $srcLocale) {
             foreach ($fields as $field) {
                 $original = $entity->getBackingValue($field);
-                if (!\is_string($original) || $original === '') {
-                    continue;
+                if (\is_string($original) && $original !== '') {
+                    $entity->setResolvedTranslation($field, $original);
                 }
-
-                $entity->setResolvedTranslation($field, $original);
             }
-            $this->logger->warning('BabelPostLoadHydrator locales', [
-                'class' => $class,
-                'srcLocale' => $srcLocale,
-                'displayLocale' => $displayLocale,
-                'requestLocale' => $this->locale->get(), // same call, but leave for clarity
-            ]);
-
             return;
         }
 
-        // Compute canonical STR hashes per field from backing + source locale
-        $fieldToStrHash = [];
+        // Compute canonical STR codes per field from backing + source locale
+        $fieldToStrCode = [];
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
             if (!\is_string($original) || $original === '') {
                 continue;
             }
 
-            $strHash = HashUtil::calcSourceKey($original, $srcLocale);
-            $fieldToStrHash[$field] = $strHash;
-
-            // Maintain tCodes if present (optional)
-            // this has been moved to a dedicated listener for array-backed translations.
-//            if (\property_exists($entity, 'tCodes')) {
-//                $codes = (array) ($entity->tCodes ?? []);
-//                $codes[$field] = $strHash;
-//                $entity->tCodes = $codes;
-//            }
+            // IMPORTANT: this must match however STR.code is computed in your onFlush subscriber.
+            $strCode = HashUtil::calcSourceKey($original, $srcLocale);
+            $fieldToStrCode[$field] = $strCode;
         }
 
-        if ($fieldToStrHash === []) {
+        if ($fieldToStrCode === []) {
             return;
         }
 
-        // Fetch translations for the display locale by (str_hash, locale)
         $conn = $em->getConnection();
+
+        // Fetch translations for the display locale by (str_code, target_locale)
+        $sql = sprintf(
+            'SELECT %s, %s FROM %s WHERE %s IN (?) AND %s = ?',
+            BabelSchema::TR_STR_CODE,
+            BabelSchema::TR_TEXT,
+            BabelSchema::TRANSLATION_TABLE,
+            BabelSchema::TR_STR_CODE,
+            BabelSchema::TR_TARGET_LOCALE
+        );
+
         $rows = $conn->executeQuery(
-            'SELECT str_hash, text
-               FROM str_translation
-              WHERE str_hash IN (?) AND locale = ?',
-            [\array_values($fieldToStrHash), $displayLocale],
+            $sql,
+            [\array_values($fieldToStrCode), $displayLocale],
             [ArrayParameterType::STRING, ParameterType::STRING]
         )->fetchAllAssociative();
 
-        $byStrHash = [];
+        $byStrCode = [];
         foreach ($rows as $r) {
-            $k = (string) ($r['str_hash'] ?? '');
-            $t = $r['text'] ?? null;
+            $k = (string) ($r[BabelSchema::TR_STR_CODE] ?? '');
+            $t = $r[BabelSchema::TR_TEXT] ?? null;
             if ($k !== '') {
-                $byStrHash[$k] = \is_string($t) ? $t : null;
+                $byStrCode[$k] = \is_string($t) ? $t : null;
             }
         }
 
-        foreach ($fieldToStrHash as $field => $strHash) {
-            if (!\array_key_exists($strHash, $byStrHash)) {
-                $this->logger->warning('Babel hydration: no StrTranslation row found for (str_hash, locale)', [
+        foreach ($fieldToStrCode as $field => $strCode) {
+            if (!\array_key_exists($strCode, $byStrCode)) {
+                // Normal for new strings / before ensure/push/pull.
+                $this->logger->debug('Babel hydration: no STR_TR row found for (str_code, target_locale)', [
                     'class'         => $class,
                     'field'         => $field,
-                    'str_hash'      => $strHash,
-                    'displayLocale' => $displayLocale,
-                    'srcLocale'     => $srcLocale,
+                    'str_code'      => $strCode,
+                    'target_locale' => $displayLocale,
+                    'src_locale'    => $srcLocale,
                 ]);
                 continue;
             }
 
-            $text = $byStrHash[$strHash];
+            $text = $byStrCode[$strCode];
+            if (!\is_string($text) || $text === '') {
+                // Translation exists but not filled yet; allow fallback to backing text.
+                continue;
+            }
 
-                if (!$text) {
-                    // we might not have a translation yet, so leave it as null so the fallback happens.  We could also tag this as __ to flag it.
-//                    $text = '__' . $field . '__NOT_TRANSLATED';
-                    continue;
-//                    dd($byStrHash, $field, $text, $strHash, $class, $displayLocale, $srcLocale);
-                }
-                $entity->setResolvedTranslation($field, $text);
+            $entity->setResolvedTranslation($field, $text);
         }
     }
 

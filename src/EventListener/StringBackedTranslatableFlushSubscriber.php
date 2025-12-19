@@ -14,7 +14,7 @@ use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
 use Survos\BabelBundle\Attribute\Translatable;
-use Survos\BabelBundle\Runtime\BabelRuntime;
+use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TargetLocaleResolver;
 use Survos\BabelBundle\Service\TranslatableIndex;
@@ -22,18 +22,20 @@ use Survos\Lingua\Core\Identity\HashUtil;
 
 final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
 {
-    public const BABEL_ENGINE = 'babel';
+    public const string BABEL_ENGINE = 'babel';
 
     /**
      * @var array<string, array{
-     *     original:string,
-     *     src:string,
-     *     targetLocales:list<string>
-     * }> keyed by STR.hash
+     *     source:string,
+     *     sourceLocale:string,
+     *     context:?string,
+     *     targetLocales:list<string>,
+     *     meta:array
+     * }> keyed by str.code
      */
     private array $pending = [];
 
-    /** @var list<array{str_hash:string, locale:string, text:string}> */
+    /** @var list<array{str_code:string, target_locale:string, engine:?string, text:string}> */
     private array $pendingWithText = [];
 
     private bool $inPostFlush = false;
@@ -59,17 +61,15 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $em  = $args->getObjectManager();
         $uow = $em->getUnitOfWork();
 
-        $insertions = $uow->getScheduledEntityInsertions();
-        $updates    = $uow->getScheduledEntityUpdates();
-
-        foreach (\array_merge($insertions, $updates) as $entity) {
+        foreach (\array_merge(
+            $uow->getScheduledEntityInsertions(),
+            $uow->getScheduledEntityUpdates()
+        ) as $entity) {
             $this->collectFromEntity($entity, 'onFlush');
         }
 
         if ($this->debug) {
             $this->logger->debug('Babel onFlush: collected', [
-                'insertions'  => \count($insertions),
-                'updates'     => \count($updates),
                 'pending_str' => \count($this->pending),
                 'pending_tr'  => \count($this->pendingWithText),
             ]);
@@ -92,13 +92,12 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $conn = $em->getConnection();
         $pf   = $conn->getDatabasePlatform();
 
-        $strTable = BabelRuntime::STRING_TABLE;
-        $trTable  = BabelRuntime::TRANSLATION_TABLE;
-        $nowFn    = $pf instanceof SqlitePlatform ? 'CURRENT_TIMESTAMP' : 'NOW()';
+        $strTable = BabelSchema::STRING_TABLE;          // "str"
+        $trTable  = BabelSchema::TRANSLATION_TABLE;     // "str_tr"
 
-        $sqlStr      = $this->buildSqlStr($pf, $strTable, $nowFn);
-        $sqlTrEnsure = $this->buildSqlTrEnsure($pf, $trTable, $nowFn);
-        $sqlTrUpsert = $this->buildSqlTrUpsert($pf, $trTable, $nowFn);
+        $sqlStrUpsert = $this->buildSqlStrUpsert($pf, $strTable);
+        $sqlTrEnsure  = $this->buildSqlTrEnsure($pf, $trTable);
+        $sqlTrUpsert  = $this->buildSqlTrUpsert($pf, $trTable);
 
         $started = false;
 
@@ -109,44 +108,47 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             }
 
             // Phase 1: STR upserts
-            foreach ($this->pending as $strHash => $row) {
-                $this->executeStrUpsert(
-                    $conn,
-                    $pf,
-                    $sqlStr,
-                    $strTable,
-                    $nowFn,
-                    $strHash,
-                    $row['original'],
-                    $row['src'],
-                );
+            foreach ($this->pending as $code => $row) {
+                $params = [
+                    'code'          => $code,
+                    'source_locale' => $row['sourceLocale'],
+                    'source'        => $row['source'],
+                    'context'       => $row['context'],
+                    'meta'          => \json_encode($row['meta'], JSON_THROW_ON_ERROR),
+                ];
+
+                try {
+                    $conn->executeStatement($sqlStrUpsert, $params);
+                } catch (\Throwable $e) {
+                    if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
+                        $this->sqliteStrUpsertFallback($conn, $strTable, $params);
+                    } else {
+                        $this->logPhaseError('STR_UPSERT', $sqlStrUpsert, $params, $e);
+                        throw $e;
+                    }
+                }
             }
 
             // Phase 2: TR ensure (stubs)
-            foreach ($this->pending as $strHash => $row) {
-                $locales = $row['targetLocales'];
-
-                // If none, nothing to ensure.
-                if ($locales === []) {
-                    continue;
-                }
-
-                foreach ($locales as $locRaw) {
+            foreach ($this->pending as $code => $row) {
+                foreach ($row['targetLocales'] as $locRaw) {
                     $loc = HashUtil::normalizeLocale((string) $locRaw);
-
-                    $trHash = HashUtil::calcTranslationKey($strHash, $loc, self::BABEL_ENGINE);
+                    if ($loc === '') {
+                        continue;
+                    }
 
                     $params = [
-                        'hash'     => $trHash,
-                        'str_hash' => $strHash,
-                        'locale'   => $loc,
+                        'str_code'      => $code,
+                        'target_locale' => $loc,
+                        'engine'        => self::BABEL_ENGINE,
+                        'meta'          => \json_encode([], JSON_THROW_ON_ERROR),
                     ];
 
                     try {
                         $conn->executeStatement($sqlTrEnsure, $params);
                     } catch (\Throwable $e) {
                         if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
-                            $this->sqliteTrEnsureFallback($conn, $trTable, $params, $nowFn);
+                            $this->sqliteTrEnsureFallback($conn, $trTable, $params);
                         } else {
                             $this->logPhaseError('TR_ENSURE', $sqlTrEnsure, $params, $e);
                         }
@@ -156,23 +158,24 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
 
             // Phase 3: TR upserts (text)
             foreach ($this->pendingWithText as $r) {
-                $strHash = $r['str_hash'];
-                $loc     = HashUtil::normalizeLocale($r['locale']);
-
-                $trHash  = HashUtil::calcTranslationKey($strHash, $loc, self::BABEL_ENGINE);
+                $loc = HashUtil::normalizeLocale($r['target_locale']);
+                if ($loc === '' || $r['text'] === '') {
+                    continue;
+                }
 
                 $params = [
-                    'hash'     => $trHash,
-                    'str_hash' => $strHash,
-                    'locale'   => $loc,
-                    'text'     => $r['text'],
+                    'str_code'      => $r['str_code'],
+                    'target_locale' => $loc,
+                    'engine'        => $r['engine'] ?? self::BABEL_ENGINE,
+                    'text'          => $r['text'],
+                    'meta'          => \json_encode([], JSON_THROW_ON_ERROR),
                 ];
 
                 try {
                     $conn->executeStatement($sqlTrUpsert, $params);
                 } catch (\Throwable $e) {
                     if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
-                        $this->sqliteTrUpsertFallback($conn, $trTable, $params, $nowFn);
+                        $this->sqliteTrUpsertFallback($conn, $trTable, $params);
                     } else {
                         $this->logPhaseError('TR_UPSERT', $sqlTrUpsert, $params, $e);
                         throw $e;
@@ -183,12 +186,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             if ($started) {
                 $conn->commit();
             }
-
-            $this->logger->info('Babel postFlush: persisted translatable strings', [
-                'str_rows' => \count($this->pending),
-                'tr_rows'  => \count($this->pendingWithText),
-                'platform' => $pf::class,
-            ]);
         } catch (\Throwable $e) {
             if ($started && $conn->isTransactionActive()) {
                 $conn->rollBack();
@@ -198,6 +195,10 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 'exception' => $e::class,
                 'message'   => $e->getMessage(),
             ]);
+
+            if ($this->debug) {
+                throw $e;
+            }
         } finally {
             $this->pending         = [];
             $this->pendingWithText = [];
@@ -207,143 +208,127 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
 
     // === SQL builders ========================================================
 
-    private function buildSqlStr(object $pf, string $strTable, string $nowFn): string
+    private function buildSqlStrUpsert(object $pf, string $strTable): string
     {
         if ($pf instanceof PostgreSQLPlatform) {
-            return "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
-                    VALUES (:hash, :original, :src, {$nowFn}, {$nowFn})
-                    ON CONFLICT (hash) DO UPDATE
-                      SET original = EXCLUDED.original,
-                          src_locale = EXCLUDED.src_locale,
-                          updated_at = {$nowFn}";
+            return "INSERT INTO {$strTable} (code, source_locale, source, context, meta)
+                    VALUES (:code, :source_locale, :source, :context, :meta::jsonb)
+                    ON CONFLICT (code) DO UPDATE
+                      SET source_locale = EXCLUDED.source_locale,
+                          source       = EXCLUDED.source,
+                          context      = EXCLUDED.context,
+                          meta         = EXCLUDED.meta";
         }
 
         if ($pf instanceof SqlitePlatform) {
-            return "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
-                    VALUES (:hash, :original, :src, {$nowFn}, {$nowFn})
-                    ON CONFLICT(hash) DO UPDATE SET
-                      original = excluded.original,
-                      src_locale = excluded.src_locale,
-                      updated_at = {$nowFn}";
+            return "INSERT INTO {$strTable} (code, source_locale, source, context, meta)
+                    VALUES (:code, :source_locale, :source, :context, :meta)
+                    ON CONFLICT(code) DO UPDATE SET
+                      source_locale = excluded.source_locale,
+                      source       = excluded.source,
+                      context      = excluded.context,
+                      meta         = excluded.meta";
         }
 
         if ($pf instanceof MySQLPlatform || $pf instanceof MariaDBPlatform) {
-            return "INSERT INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
-                    VALUES (:hash, :original, :src, {$nowFn}, {$nowFn})
+            return "INSERT INTO {$strTable} (code, source_locale, source, context, meta)
+                    VALUES (:code, :source_locale, :source, :context, :meta)
                     ON DUPLICATE KEY UPDATE
-                      original   = VALUES(original),
-                      src_locale = VALUES(src_locale),
-                      updated_at = {$nowFn}";
+                      source_locale = VALUES(source_locale),
+                      source       = VALUES(source),
+                      context      = VALUES(context),
+                      meta         = VALUES(meta)";
         }
 
         throw new \RuntimeException('Unsupported DB platform for STR upsert: ' . $pf::class);
     }
 
-    private function buildSqlTrEnsure(object $pf, string $trTable, string $nowFn): string
+    private function buildSqlTrEnsure(object $pf, string $trTable): string
     {
         if ($pf instanceof PostgreSQLPlatform) {
-            return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                    VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                    ON CONFLICT DO NOTHING";
+            return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                    VALUES (:str_code, :target_locale, :engine, NULL, :meta::jsonb)
+                    ON CONFLICT (str_code, target_locale, engine) DO NOTHING";
         }
 
         if ($pf instanceof SqlitePlatform) {
-            return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                    VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                    ON CONFLICT DO NOTHING";
+            return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                    VALUES (:str_code, :target_locale, :engine, NULL, :meta)
+                    ON CONFLICT(str_code, target_locale, engine) DO NOTHING";
         }
 
-        return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})
-                ON DUPLICATE KEY UPDATE hash = hash";
+        return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                VALUES (:str_code, :target_locale, :engine, NULL, :meta)
+                ON DUPLICATE KEY UPDATE str_code = str_code";
     }
 
-    private function buildSqlTrUpsert(object $pf, string $trTable, string $nowFn): string
+    private function buildSqlTrUpsert(object $pf, string $trTable): string
     {
         if ($pf instanceof PostgreSQLPlatform) {
-            return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                    VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
-                    ON CONFLICT (hash) DO UPDATE
-                      SET text       = EXCLUDED.text,
-                          str_hash   = EXCLUDED.str_hash,
-                          locale     = EXCLUDED.locale,
-                          updated_at = {$nowFn}";
+            return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                    VALUES (:str_code, :target_locale, :engine, :text, :meta::jsonb)
+                    ON CONFLICT (str_code, target_locale, engine) DO UPDATE
+                      SET text = EXCLUDED.text,
+                          meta = EXCLUDED.meta";
         }
 
         if ($pf instanceof SqlitePlatform) {
-            return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                    VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
-                    ON CONFLICT(hash) DO UPDATE SET
-                      text       = excluded.text,
-                      str_hash   = excluded.str_hash,
-                      locale     = excluded.locale,
-                      updated_at = {$nowFn}";
+            return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                    VALUES (:str_code, :target_locale, :engine, :text, :meta)
+                    ON CONFLICT(str_code, target_locale, engine) DO UPDATE SET
+                      text = excluded.text,
+                      meta = excluded.meta";
         }
 
-        return "INSERT INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})
+        return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                VALUES (:str_code, :target_locale, :engine, :text, :meta)
                 ON DUPLICATE KEY UPDATE
-                  text       = VALUES(text),
-                  str_hash   = VALUES(str_hash),
-                  locale     = VALUES(locale),
-                  updated_at = {$nowFn}";
+                  text = VALUES(text),
+                  meta = VALUES(meta)";
     }
 
-    // === Exec helpers ========================================================
+    // === SQLite fallbacks =====================================================
 
-    private function executeStrUpsert(
-        Connection $conn,
-        object $pf,
-        string $sqlStr,
-        string $strTable,
-        string $nowFn,
-        string $strHash,
-        string $original,
-        string $src,
-    ): void {
-        $params = [
-            'hash'     => $strHash,
-            'original' => $original,
-            'src'      => $src,
-        ];
-
-        try {
-            $conn->executeStatement($sqlStr, $params);
-        } catch (\Throwable $e) {
-            if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
-                $ins = "INSERT OR IGNORE INTO {$strTable} (hash, original, src_locale, created_at, updated_at)
-                        VALUES (:hash, :original, :src, {$nowFn}, {$nowFn})";
-                $upd = "UPDATE {$strTable}
-                        SET original = :original, src_locale = :src, updated_at = {$nowFn}
-                        WHERE hash = :hash";
-
-                $conn->executeStatement($ins, $params);
-                $conn->executeStatement($upd, $params);
-                return;
-            }
-
-            $this->logPhaseError('STR_UPSERT', $sqlStr, $params, $e);
-            throw $e;
-        }
-    }
-
-    private function sqliteTrEnsureFallback(Connection $conn, string $trTable, array $params, string $nowFn): void
+    private function sqliteStrUpsertFallback(Connection $conn, string $strTable, array $params): void
     {
-        $ins = "INSERT OR IGNORE INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                VALUES (:hash, :str_hash, :locale, NULL, {$nowFn}, {$nowFn})";
-        $conn->executeStatement($ins, $params);
-    }
-
-    private function sqliteTrUpsertFallback(Connection $conn, string $trTable, array $params, string $nowFn): void
-    {
-        $ins = "INSERT OR IGNORE INTO {$trTable} (hash, str_hash, locale, text, created_at, updated_at)
-                VALUES (:hash, :str_hash, :locale, :text, {$nowFn}, {$nowFn})";
-        $upd = "UPDATE {$trTable}
-                SET text = :text, updated_at = {$nowFn}
-                WHERE hash = :hash";
+        $ins = "INSERT OR IGNORE INTO {$strTable} (code, source_locale, source, context, meta)
+                VALUES (:code, :source_locale, :source, :context, :meta)";
+        $upd = "UPDATE {$strTable}
+                SET source_locale = :source_locale,
+                    source       = :source,
+                    context      = :context,
+                    meta         = :meta
+                WHERE code = :code";
 
         $conn->executeStatement($ins, $params);
         $conn->executeStatement($upd, $params);
+    }
+
+    private function sqliteTrEnsureFallback(Connection $conn, string $trTable, array $params): void
+    {
+        $ins = "INSERT OR IGNORE INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                VALUES (:str_code, :target_locale, :engine, NULL, :meta)";
+        $conn->executeStatement($ins, $params);
+    }
+
+    private function sqliteTrUpsertFallback(Connection $conn, string $trTable, array $params): void
+    {
+        $ins = "INSERT OR IGNORE INTO {$trTable} (str_code, target_locale, engine, text, meta)
+                VALUES (:str_code, :target_locale, :engine, :text, :meta)";
+        $upd = "UPDATE {$trTable}
+                SET text = :text, meta = :meta
+                WHERE str_code = :str_code AND target_locale = :target_locale AND engine = :engine";
+
+        $conn->executeStatement($ins, $params);
+        $conn->executeStatement($upd, $params);
+    }
+
+    private function isSqliteConflictTargetError(\Throwable $e): bool
+    {
+        return \str_contains(
+            $e->getMessage(),
+            'ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint'
+        );
     }
 
     // === Collection ==========================================================
@@ -353,7 +338,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $class = $entity::class;
 
         $fields = $this->index->fieldsFor($class);
-
         if ($fields === []) {
             $fields = $this->discoverTranslatableFieldsFallback($entity);
             if ($fields === []) {
@@ -362,12 +346,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         }
 
         if (!\method_exists($entity, 'getBackingValue')) {
-            if ($this->debug) {
-                $this->logger->debug('Babel collect: entity missing getBackingValue(); skipping', [
-                    'class' => $class,
-                    'phase' => $phase,
-                ]);
-            }
             return 0;
         }
 
@@ -394,32 +372,15 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 continue;
             }
 
-            $strHash = HashUtil::calcSourceKey($original, $srcLocale);
+            $strCode = HashUtil::calcSourceKey($original, $srcLocale);
 
-            $this->pending[$strHash] = [
-                'original'      => $original,
-                'src'           => $srcLocale,
+            $this->pending[$strCode] = [
+                'source'        => $original,
+                'sourceLocale'  => $srcLocale,
+                'context'       => null,
                 'targetLocales' => $resolvedTargets,
+                'meta'          => [],
             ];
-
-            if (\property_exists($entity, '_pendingTranslations') && \is_array($entity->_pendingTranslations ?? null)) {
-                $pairs = $entity->_pendingTranslations[$field] ?? null;
-
-                if (\is_array($pairs)) {
-                    foreach ($pairs as $loc => $txt) {
-                        $loc = HashUtil::normalizeLocale((string) $loc);
-                        if ($loc === '' || !\is_string($txt) || $txt === '') {
-                            continue;
-                        }
-
-                        $this->pendingWithText[] = [
-                            'str_hash' => $strHash,
-                            'locale'   => $loc,
-                            'text'     => $txt,
-                        ];
-                    }
-                }
-            }
 
             $count++;
         }
@@ -443,7 +404,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                     return $v;
                 }
             }
-
             if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']}();
                 if (\is_string($v) && $v !== '') {
@@ -468,14 +428,6 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         }
 
         return $out;
-    }
-
-    private function isSqliteConflictTargetError(\Throwable $e): bool
-    {
-        return \str_contains(
-            $e->getMessage(),
-            'ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint'
-        );
     }
 
     private function logPhaseError(string $phase, string $sql, array $params, \Throwable $e): void

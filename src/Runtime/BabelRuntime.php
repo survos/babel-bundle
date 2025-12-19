@@ -7,7 +7,7 @@ namespace Survos\BabelBundle\Runtime;
  * Process/request-scoped translation runtime used by property hooks.
  *
  * Initialize once per request/CLI:
- *   BabelRuntime::init($translator, $locale, 'en');
+ *   BabelRuntime::init($locale, 'en');
  *
  * Then in hooks:
  *   $hash = BabelRuntime::hash($text, $src, $context);
@@ -15,8 +15,12 @@ namespace Survos\BabelBundle\Runtime;
  */
 final class BabelRuntime
 {
-    public const TRANSLATION_TABLE = 'str_translation';
-    public const STRING_TABLE = 'str';
+    /**
+     * Kept for backwards compatibility with any older DBAL snippets.
+     * Prefer Survos\BabelBundle\Runtime\BabelSchema for DB table/column names.
+     */
+    public const string STRING_TABLE = 'str';
+    public const string TRANSLATION_TABLE = 'str_tr';
 
     private static ?string $locale = null;
     private static string $fallback = 'en';
@@ -28,11 +32,10 @@ final class BabelRuntime
 
     public static function init(?string $locale, string $fallback = 'en', ?callable $hashFn = null): void
     {
-        self::$locale     = $locale;
-        self::$fallback   = $fallback;
-        self::$hashFn     = $hashFn;
+        self::$locale   = $locale;
+        self::$fallback = $fallback;
+        self::$hashFn   = $hashFn;
     }
-
 
     public static function setLocale(?string $locale): void
     {
@@ -74,17 +77,19 @@ final class BabelRuntime
             $fn = self::$hashFn;
             return $fn($text, $srcLocale, $context);
         }
-        return \hash('xxh3', $srcLocale . "\0" . (string)($context ?? '') . "\0" . $text);
+
+        return \hash('xxh3', $srcLocale . "\0" . (string) ($context ?? '') . "\0" . $text);
     }
 
     /**
-     * Translator-agnostic lookup: we try a few common method names on your TranslatorInterface impl.
+     * Hook-time lookup (translator-agnostic).
+     *
+     * We intentionally do not query the DB here; Doctrine postLoad hydration
+     * should populate resolved values. Returning null makes the hook fall back
+     * to the backing text.
      */
-// src/Runtime/BabelRuntime.php
     public static function lookup(string $hash, string $locale): ?string
     {
-        // No runtime engine calls here. Hydration will set resolved values;
-        // returning null makes the property hook fall back to the backing text.
         return null;
     }
 }
