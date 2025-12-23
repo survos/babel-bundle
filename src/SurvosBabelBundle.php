@@ -48,12 +48,12 @@ final class SurvosBabelBundle extends AbstractBundle
             ]);
         }
 
-        $builder->register(BabelDataCollector::class)
-            ->setAutowired(true)
-            ->setAutoconfigured(true)
-            ->setPublic(false);
-
         if ((bool) $builder->getParameter('kernel.debug')) {
+            $builder->register(BabelDataCollector::class)
+                ->setAutowired(true)
+                ->setAutoconfigured(true)
+                ->setPublic(false);
+
             $container->import(\dirname(__DIR__).'/config/services_debug.php');
         }
 

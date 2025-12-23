@@ -19,10 +19,10 @@ use Survos\Lingua\Core\Identity\HashUtil;
 final class BabelDebugPostLoadListener
 {
     public function __construct(
-        private readonly BabelDebugRecorderInterface $recorder,
         private readonly Connection $connection,
         private readonly TranslatableIndex $index,
         private readonly ?LocaleContext $localeContext = null,
+        private readonly ?BabelDebugRecorderInterface $recorder=null, // doesn't exist in prod
         private readonly ?RequestStack $requestStack = null,    ) {
     }
 
