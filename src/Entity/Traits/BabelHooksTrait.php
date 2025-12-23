@@ -30,6 +30,9 @@ trait BabelHooksTrait
     /** @var array<string,string> runtime cache: field => resolved text */
     private array $_resolved = [];
 
+    /** @var array<string,mixed> runtime cache: field => resolved term label(s) */
+    private array $_resolvedTerms = [];
+
     /**
      * Resolve a translatable field for the current runtime locale.
      *
@@ -47,20 +50,11 @@ trait BabelHooksTrait
             return $this->_resolved[$field];
         }
 
-        // If runtime locale is not set (e.g. CLI without init), return source
         $displayLocale = BabelRuntime::getLocale();
         if ($displayLocale === null || $displayLocale === '') {
             return $backingValue;
         }
 
-        // IMPORTANT:
-        // The str_hash must be computed using the *source* locale for this entity.
-        // BabelRuntime::fallback() is legacy; do not use it as a source locale.
-        //
-        // We use BabelRuntime::getSourceLocale() if available; otherwise we default
-        // to BabelRuntime::fallback() only as an absolute last resort.
-        //
-        // If you have a LocaleContext in your app, prefer setting BabelRuntime explicitly.
         $sourceLocale = \method_exists(BabelRuntime::class, 'getSourceLocale')
             ? (string) BabelRuntime::getSourceLocale()
             : (string) (BabelRuntime::fallback() ?: 'en');
@@ -68,34 +62,41 @@ trait BabelHooksTrait
         $sourceLocale = HashUtil::normalizeLocale($sourceLocale);
         $displayLocale = HashUtil::normalizeLocale($displayLocale);
 
-        // Prefer persisted code if present; otherwise compute canonical source hash
-        $codes  = $this->tCodes ?? [];
+        $codes   = $this->tCodes ?? [];
         $strHash = $codes[$field] ?? HashUtil::calcSourceKey($backingValue, $sourceLocale);
 
-        // Lookup resolved translation by (str_hash, displayLocale)
-        // NOTE: BabelRuntime::lookup expects a str_hash for StrTranslation lookup.
         $text = BabelRuntime::lookup($strHash, $displayLocale);
 
-        // Fallback to source if not found
         $resolved = ($text !== null && $text !== '') ? $text : $backingValue;
 
         return $this->_resolved[$field] = $resolved;
     }
 
-    /**
-     * Store resolved translation for a given field (non-persisted runtime cache).
-     */
     public function setResolvedTranslation(string $field, string $text): void
     {
         $this->_resolved[$field] = $text;
     }
 
-    /**
-     * Get resolved translation for a given field if available.
-     */
     public function getResolvedTranslation(string $field): ?string
     {
         return $this->_resolved[$field] ?? null;
+    }
+
+    /**
+     * Store resolved term label(s) for a given BabelTerm field.
+     *
+     * Value is:
+     * - string for scalar term fields
+     * - array<string> for multiple term fields
+     */
+    public function setResolvedTerm(string $field, mixed $value): void
+    {
+        $this->_resolvedTerms[$field] = $value;
+    }
+
+    public function getResolvedTerm(string $field): mixed
+    {
+        return $this->_resolvedTerms[$field] ?? null;
     }
 
     /**
@@ -118,7 +119,6 @@ trait BabelHooksTrait
             ));
         }
 
-        // Works even for private properties within the defining class/trait context.
         return $this->$prop;
     }
 }

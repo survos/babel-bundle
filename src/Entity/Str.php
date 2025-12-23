@@ -6,9 +6,10 @@ namespace Survos\BabelBundle\Entity;
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Entity\Base\StrBase;
 use Survos\BabelBundle\Repository\StrRepository;
+use Survos\BabelBundle\Runtime\BabelSchema;
 
 #[ORM\Entity(repositoryClass: StrRepository::class)]
-#[ORM\Table(name: 'str')]
+#[ORM\Table(name: BabelSchema::STR_TABLE)]
 #[ORM\UniqueConstraint(name: 'str_code_uq', columns: ['code'])]
 #[ORM\Index(name: 'str_ctx_idx', columns: ['context'])]
 #[ORM\Index(name: 'str_src_locale_idx', columns: ['source_locale'])]

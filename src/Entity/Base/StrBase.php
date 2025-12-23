@@ -29,6 +29,12 @@ abstract class StrBase
     #[ORM\Column(name: 'context', length: 80, nullable: true)]
     public ?string $context = null;
 
-    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true])]
+    /**
+     * Metadata for the source string.
+     *
+     * Important: set a DB-level default so bulk inserts that omit meta do not fail
+     * on platforms (notably SQLite) where NOT NULL JSON may otherwise have no DEFAULT.
+     */
+    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true, 'default' => '[]'])]
     public array $meta = [];
 }

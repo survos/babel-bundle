@@ -3,187 +3,164 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
 
-use Doctrine\ORM\EntityManagerInterface;
-use Psr\Log\LoggerInterface;
-use Survos\BabelBundle\EventListener\StringBackedTranslatableFlushSubscriber;
+use Doctrine\DBAL\Connection;
+use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
-use Survos\BabelBundle\Service\TargetLocaleResolver;
 use Survos\Lingua\Core\Identity\HashUtil;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Helper\ProgressBar;
-use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-/**
- * Ensure there is a StrTranslation row for each (str_hash, targetLocale).
- * Useful as a backfill if some strings predate the onFlush/postFlush upserter.
- */
-#[AsCommand('babel:ensure', 'Ensure (str_hash, locale) rows exist in str_translation for target locale(s)')]
+#[AsCommand('babel:ensure', 'Ensure (str.code, target_locale) rows exist in str_tr for target locale(s)')]
 final class TranslationsEnsureCommand
 {
     public function __construct(
-        private readonly EntityManagerInterface $em,
-        private readonly LoggerInterface $logger,
+        private readonly Connection $db,
         private readonly LocaleContext $localeContext,
-        private readonly TargetLocaleResolver $targetLocaleResolver,
     ) {}
 
     public function __invoke(
         SymfonyStyle $io,
-        InputInterface $input,
+        OutputInterface $output,
         #[Argument('Target locales (comma-delimited) or empty to use enabled_locales')] ?string $localesArg = null,
-        #[Option('Filter by source (Str.srcLocale) when present')] ?string $source = null,
-        #[Option('Batch size for flush/clear')] int $batchSize = 500,
-        #[Option('Limit STR rows (0 = unlimited)')] int $limit = 0,
+        #[Option('Filter by STR.source_locale')] ?string $sourceLocale = null,
+        #[Option('Filter by STR.context substring (e.g. "term:" or "pixie:cleveland")')] ?string $context = null,
+
+        #[Option('Provider engine value for STR_TR rows (optional; NOT a stub marker).')]
+        ?string $engine = null,
+
+        #[Option('Initial status for inserted STR_TR rows (enum-ready).')]
+        string $status = 'new',
+
+        #[Option('Extra meta (JSON object) merged into stub meta.')]
+        ?string $meta = null,
+
+        #[Option('Limit STR rows scanned per locale (0 = unlimited)')] int $limit = 0,
         #[Option('Dry-run: do not write')] bool $dryRun = false,
-        #[Option('Str entity FQCN')] string $strClass = 'App\\Entity\\Str',
-        #[Option('StrTranslation entity FQCN')] string $trClass = 'App\\Entity\\StrTranslation',
     ): int {
-        if (!class_exists($strClass) || !class_exists($trClass)) {
-            $io->error('Str/StrTranslation classes not found. Adjust --str-class/--tr-class.');
-            return Command::FAILURE;
+        $targets = $this->parseLocalesArg($localesArg);
+
+        if ($targets === []) {
+            $targets = $this->localeContext->getEnabled();
+            if ($targets === []) {
+                $targets = [$this->localeContext->getDefault()];
+            }
         }
 
-        $explicitTargets = $this->parseLocalesArg($localesArg);
+        $targets = array_values(array_unique(array_map([HashUtil::class, 'normalizeLocale'], $targets)));
+        $targets = array_values(array_filter($targets, static fn(string $l) => $l !== ''));
 
-        // Candidate locales are either explicit targets (argument) or enabled_locales.
-        $candidateLocales = $explicitTargets ?: $this->localeContext->getEnabled();
-        if ($candidateLocales === []) {
-            $candidateLocales = [$this->localeContext->getDefault()];
-        }
-        $candidateLocales = array_values(array_unique(array_map([HashUtil::class, 'normalizeLocale'], $candidateLocales)));
-        $candidateLocales = array_values(array_filter($candidateLocales, static fn(string $l) => $l !== ''));
-
-        if ($candidateLocales === []) {
-            $io->warning('No candidate locales resolved. Pass locales (e.g. "es,fr") or configure enabled_locales.');
+        if ($targets === []) {
+            $io->error('No target locales resolved.');
             return Command::INVALID;
         }
 
-        if ($source !== null && trim($source) !== '') {
-            $source = HashUtil::normalizeLocale($source);
-        } else {
-            $source = null;
+        $extraMeta = [];
+        if ($meta !== null && trim($meta) !== '') {
+            $decoded = json_decode($meta, true);
+            if (!is_array($decoded)) {
+                $io->error('Invalid --meta JSON. Must be a JSON object.');
+                return Command::INVALID;
+            }
+            $extraMeta = $decoded;
         }
 
-        $strRepo = $this->em->getRepository($strClass);
-        $trRepo  = $this->em->getRepository($trClass);
+        $io->title('Babel ensure');
+        $io->writeln('Targets: ' . json_encode($targets, JSON_UNESCAPED_SLASHES));
+        $io->writeln('Engine:  ' . ($engine ?? '(null)'));
+        $io->writeln('Status:  ' . $status);
 
-        // Base STR query
-        $baseQb = $strRepo->createQueryBuilder('s');
-        if ($source !== null) {
-            $baseQb->andWhere('s.srcLocale = :src')->setParameter('src', $source);
+        $filters = [];
+        $paramsBase = [
+            'eng' => $engine, // may be null
+            'st'  => $status,
+        ];
+
+        if ($sourceLocale !== null && trim($sourceLocale) !== '') {
+            $paramsBase['sl'] = HashUtil::normalizeLocale($sourceLocale);
+            $filters[] = 's.' . BabelSchema::STR_SOURCE_LOCALE . ' = :sl';
         }
 
-        // Total STR rows
-        $countQb = clone $baseQb;
-        $total = (int) $countQb->select('COUNT(s.hash)')->getQuery()->getSingleScalarResult();
-        if ($limit > 0) {
-            $total = min($total, $limit);
+        if ($context !== null && trim($context) !== '') {
+            $paramsBase['ctx'] = '%' . $context . '%';
+            $filters[] = 's.' . BabelSchema::STR_CONTEXT . ' LIKE :ctx';
         }
 
-        if ($total === 0) {
-            $io->note('No source rows match filters.');
-            return Command::SUCCESS;
-        }
+        $filterSql = $filters ? (' AND ' . implode(' AND ', $filters)) : '';
 
-        if ($limit > 0) {
-            $baseQb->setMaxResults($limit);
-        }
-        $iter = $baseQb->getQuery()->toIterable();
+        $totalCreated = 0;
 
-        $created = 0;
-        $exists  = 0;
-        $seen    = 0;
+        foreach ($targets as $loc) {
+            $params = $paramsBase + ['loc' => $loc];
 
-        $progressBar = new ProgressBar($io, $total);
-        $progressBar->setRedrawFrequency(200);
-        $progressBar->setFormat(
-            ' %current%/%max% [%bar%] %percent:3s%%  • seen:%message1%  created:%message2%  exists:%message3%'
-        );
-        $progressBar->setMessage('0', 'message1');
-        $progressBar->setMessage('0', 'message2');
-        $progressBar->setMessage('0', 'message3');
+            if ($output->getVerbosity() >= OutputInterface::VERBOSITY_VERBOSE) {
+                $candidateCount = (int) $this->db->fetchOne(sprintf(
+                    'SELECT COUNT(*) FROM %s s WHERE s.%s <> :loc%s',
+                    BabelSchema::STR_TABLE,
+                    BabelSchema::STR_SOURCE_LOCALE,
+                    $filterSql
+                ), $params);
 
-        foreach ($iter as $str) {
-            ++$seen;
+                $existingTr = (int) $this->db->fetchOne(sprintf(
+                    'SELECT COUNT(*) FROM %s tr WHERE tr.%s = :loc',
+                    BabelSchema::STR_TR_TABLE,
+                    BabelSchema::STR_TR_TARGET_LOCALE
+                ), $params);
 
-            /** @var string $strHash */
-            $strHash = (string) ($str->hash ?? '');
-            if ($strHash === '') {
-                $this->advance($progressBar, $seen, $created, $exists);
-                if ($limit > 0 && $seen >= $limit) { break; }
+                $io->writeln(sprintf('locale=%s: candidates=%d existing_tr=%d', $loc, $candidateCount, $existingTr));
+            }
+
+            if ($dryRun) {
+                $io->writeln(sprintf('locale=%s: DRY-RUN (no inserts)', $loc));
                 continue;
             }
 
-            $srcLocale = HashUtil::normalizeLocale((string) ($str->srcLocale ?? ''));
-            if ($srcLocale === '') {
-                $srcLocale = $this->localeContext->getDefault();
+            $stubMeta = array_merge([
+                'createdBy' => 'babel:ensure',
+                'createdAt' => (new \DateTimeImmutable())->format(DATE_ATOM),
+                'targetLocale' => $loc,
+                'filters' => array_filter([
+                    'sourceLocale' => $paramsBase['sl'] ?? null,
+                    'context' => $context ?? null,
+                ]),
+            ], $extraMeta);
+
+            $metaJson = json_encode($stubMeta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($metaJson)) {
+                $metaJson = '{}';
             }
 
-            // Resolve targets per row (critical: excludes srcLocale).
-            $targets = $this->targetLocaleResolver->resolve(
-                enabledLocales: $candidateLocales,
-                explicitTargets: $explicitTargets ?: null,
-                sourceLocale: $srcLocale,
+            // IMPORTANT: if your schema has a UNIQUE on (str_code,target_locale) this is correct.
+            // If your schema uniqueness includes engine, you should migrate it; otherwise duplicates remain possible.
+            $insertSql = sprintf(
+                'INSERT OR IGNORE INTO %s (%s, %s, %s, %s, %s, %s)
+                 SELECT s.%s, :loc, :eng, NULL, :st, :meta
+                 FROM %s s
+                 WHERE s.%s <> :loc%s%s',
+                BabelSchema::STR_TR_TABLE,
+                BabelSchema::STR_TR_STR_CODE,
+                BabelSchema::STR_TR_TARGET_LOCALE,
+                BabelSchema::STR_TR_ENGINE,
+                BabelSchema::STR_TR_TEXT,
+                BabelSchema::STR_TR_STATUS,
+                BabelSchema::STR_TR_META,
+                BabelSchema::STR_CODE,
+                BabelSchema::STR_TABLE,
+                BabelSchema::STR_SOURCE_LOCALE,
+                $filterSql,
+                $limit > 0 ? (' LIMIT ' . (int) $limit) : ''
             );
 
-            foreach ($targets as $locale) {
-                // Exists? UNIQUE(str_hash, locale)
-                $already = (bool) $trRepo->createQueryBuilder('t')
-                    ->select('t.hash')
-                    ->andWhere('t.strHash = :sh AND t.locale = :l')
-                    ->setParameter('sh', $strHash)
-                    ->setParameter('l', $locale)
-                    ->setMaxResults(1)
-                    ->getQuery()
-                    ->getOneOrNullResult();
+            $affected = (int) $this->db->executeStatement($insertSql, $params + ['meta' => $metaJson]);
+            $totalCreated += $affected;
 
-                if ($already) {
-                    ++$exists;
-                    continue;
-                }
-
-                if (!$dryRun) {
-                    $tr = new $trClass(
-                        HashUtil::calcTranslationKey($strHash, $locale, StringBackedTranslatableFlushSubscriber::BABEL_ENGINE),
-                        $strHash,
-                        $locale,
-                        null
-                    );
-                    $this->em->persist($tr);
-                }
-                ++$created;
-
-                if (!$dryRun && ($created % $batchSize) === 0) {
-                    $this->em->flush();
-                    $this->em->clear();
-                    $strRepo = $this->em->getRepository($strClass);
-                    $trRepo  = $this->em->getRepository($trClass);
-                }
-            }
-
-            $this->advance($progressBar, $seen, $created, $exists);
-
-            if ($limit > 0 && $seen >= $limit) { break; }
+            $io->writeln(sprintf('locale=%s: created %d', $loc, $affected));
         }
 
-        if (!$dryRun) {
-            $this->em->flush();
-            $this->em->clear();
-        }
-
-        $io->writeln('');
-        $io->success(sprintf(
-            'Done → STR seen %d, StrTranslation created %d, existed %d%s',
-            $seen,
-            $created,
-            $exists,
-            $dryRun ? ' (dry-run)' : ''
-        ));
-
+        $io->success(sprintf('Done → STR_TR created %d', $totalCreated));
         return Command::SUCCESS;
     }
 
@@ -197,13 +174,5 @@ final class TranslationsEnsureCommand
         $parts = array_values(array_filter(array_map('trim', explode(',', $localesArg))));
         $parts = array_values(array_unique(array_map([HashUtil::class, 'normalizeLocale'], $parts)));
         return array_values(array_filter($parts, static fn(string $l) => $l !== ''));
-    }
-
-    private function advance(ProgressBar $bar, int $seen, int $created, int $exists): void
-    {
-        $bar->advance();
-        $bar->setMessage((string) $seen, 'message1');
-        $bar->setMessage((string) $created, 'message2');
-        $bar->setMessage((string) $exists, 'message3');
     }
 }

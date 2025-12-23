@@ -19,9 +19,6 @@ final class BabelRuntime
      * Kept for backwards compatibility with any older DBAL snippets.
      * Prefer Survos\BabelBundle\Runtime\BabelSchema for DB table/column names.
      */
-    public const string STRING_TABLE = 'str';
-    public const string TRANSLATION_TABLE = 'str_tr';
-
     private static ?string $locale = null;
     private static string $fallback = 'en';
 

@@ -92,8 +92,8 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         $conn = $em->getConnection();
         $pf   = $conn->getDatabasePlatform();
 
-        $strTable = BabelSchema::STRING_TABLE;          // "str"
-        $trTable  = BabelSchema::TRANSLATION_TABLE;     // "str_tr"
+        $strTable = BabelSchema::STR_TABLE;          // "str"
+        $trTable  = BabelSchema::STR_TR_TABLE;     // "str_tr"
 
         $sqlStrUpsert = $this->buildSqlStrUpsert($pf, $strTable);
         $sqlTrEnsure  = $this->buildSqlTrEnsure($pf, $trTable);

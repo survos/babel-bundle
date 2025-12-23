@@ -10,6 +10,7 @@ namespace Survos\BabelBundle\Service;
  * [
  *   FQCN => [
  *     'fields'         => [ fieldName => ['context' => ?string], ... ],
+ *     'terms'          => [ fieldName => ['set'=>string,'multiple'=>bool,'context'=>?string], ... ],
  *     'localeAccessor' => ['type'=>'prop'|'method','name'=>string,'format'=>?string] | null,
  *     'sourceLocale'   => ?string,        // from #[BabelLocale(locale: ...)]
  *     'targetLocales'  => ?array<string>, // from #[BabelLocale(targetLocales: [...])]
@@ -59,6 +60,24 @@ final class TranslatableIndex
         }
 
         return \array_keys($cfg['fields']);
+    }
+
+    /**
+     * Term-backed fields (#[BabelTerm]).
+     *
+     * @return array<string, array{set:string,multiple:bool,context:?string}>
+     */
+    public function termsFor(string $class): array
+    {
+        $cfg = $this->map[$class] ?? null;
+        $terms = $cfg['terms'] ?? null;
+
+        if (!$terms || !\is_array($terms)) {
+            return [];
+        }
+
+        /** @var array<string, array{set:string,multiple:bool,context:?string}> $terms */
+        return $terms;
     }
 
     /**

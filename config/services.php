@@ -8,7 +8,10 @@ use Survos\BabelBundle\Command\BabelBrowseCommand;
 use Survos\BabelBundle\Command\BabelDebugSchemaCommand;
 use Survos\BabelBundle\Command\BabelPreviewCommand;
 use Survos\BabelBundle\Command\BabelStatsCommand;
+use Survos\BabelBundle\Command\BabelStrCommand;
+use Survos\BabelBundle\Command\BabelTermSetCommand;
 use Survos\BabelBundle\Command\BabelTranslatableDumpCommand;
+use Survos\BabelBundle\Command\BabelTrCommand;
 use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Command\TranslatableIndexCommand;
 use Survos\BabelBundle\Command\TranslateCommand;
@@ -99,9 +102,17 @@ return static function (ContainerConfigurator $c): void {
 
     $s->set(BabelStatsCommand::class)
         ->autoconfigure()
-//        ->arg('$registry', service('doctrine'))
-//        ->arg('$router', service(StringStorageRouter::class))
         ->tag('console.command');
+
+    $s->set(BabelTermSetCommand::class)
+        ->autoconfigure()
+        ->tag('console.command');
+
+    foreach ([BabelTrCommand::class, BabelStrCommand::class] as $commandClass) {
+        $s->set($commandClass)
+            ->autoconfigure()
+            ->tag('console.command');
+    }
 
     $s->set(BabelPreviewCommand::class)
         ->autoconfigure()

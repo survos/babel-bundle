@@ -10,119 +10,75 @@ use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
-#[AsCommand(
-    'babel:stats',
-    'Show translation statistics for Babel STR/STR_TR (per-locale coverage), plus Term/TermSet overview.'
-)]
+#[AsCommand('babel:stats', 'Show translation statistics for Babel STR/STR_TR (per-locale coverage + engine breakdown).')]
 final class BabelStatsCommand
 {
     public function __construct(
         private readonly Connection $connection,
-    ) {
-    }
+    ) {}
 
     public function __invoke(
         SymfonyStyle $io,
         #[Option('Filter stats to a specific target locale (e.g. "es").')]
         ?string $locale = null,
+        #[Option('Filter stats to a specific TR engine (default: "babel"). Use "(all)" to disable.')]
+        string $engine = 'babel',
         #[Option('Disable ASCII coverage bars in the output.')]
         bool $noBars = false,
-        #[Option('Include Term/TermSet counts.')]
-        bool $terms = true,
     ): int {
         $io->title('Babel translation stats');
 
-        $strTable = BabelSchema::STRING_TABLE;          // "str"
-        $trTable  = BabelSchema::TRANSLATION_TABLE;     // "str_tr"
+        $strTable = BabelSchema::STR_TABLE;
+        $trTable  = BabelSchema::STR_TR_TABLE;
 
-        // --- STR total ---
-        try {
-            $totalStr = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$strTable}");
-        } catch (\Throwable $e) {
-            $io->error(sprintf(
-                'Failed to query STR table "%s": %s',
-                $strTable,
-                $e->getMessage()
-            ));
-
-            return Command::FAILURE;
-        }
-
-        // --- STR_TR total ---
-        try {
-            $params = [];
-            $sqlTrTotal = "SELECT COUNT(*) FROM {$trTable}";
-            if ($locale !== null) {
-                $sqlTrTotal .= " WHERE " . BabelSchema::TR_TARGET_LOCALE . " = :locale";
-                $params['locale'] = $locale;
-            }
-
-            $totalTr = (int) $this->connection->fetchOne($sqlTrTotal, $params);
-        } catch (\Throwable $e) {
-            $io->error(sprintf(
-                'Failed to query STR_TR table "%s": %s',
-                $trTable,
-                $e->getMessage()
-            ));
-
-            return Command::FAILURE;
-        }
-
+        $totalStr = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$strTable}");
         $io->writeln(sprintf('STR rows (%s): <info>%d</info>', $strTable, $totalStr));
+
+        $params = [];
+        $where = [];
+
+        if ($locale !== null) {
+            $where[] = BabelSchema::STR_TR_TARGET_LOCALE.' = :locale';
+            $params['locale'] = $locale;
+        }
+
+        $engineFilterEnabled = $engine !== '(all)';
+        if ($engineFilterEnabled) {
+            $where[] = BabelSchema::STR_TR_ENGINE.' = :engine';
+            $params['engine'] = $engine;
+        }
+
+        $whereSql = $where ? ('WHERE '.implode(' AND ', $where)) : '';
+
+        $totalTr = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$trTable} {$whereSql}", $params);
         $io->writeln(sprintf(
-            'STR_TR rows (%s%s): <info>%d</info>',
+            'STR_TR rows (%s%s%s): <info>%d</info>',
             $trTable,
             $locale ? sprintf(', target_locale="%s"', $locale) : '',
+            $engineFilterEnabled ? sprintf(', engine="%s"', $engine) : '',
             $totalTr
         ));
         $io->newLine();
 
-        // --- Per-locale aggregation ---
-        $params = [];
-        $sql = sprintf(
-            "
+        // Per-locale coverage for selected engine
+        $io->section('Per-locale coverage');
+
+        $sql = "
             SELECT
-                %s AS locale,
+                ".BabelSchema::STR_TR_TARGET_LOCALE." AS locale,
                 COUNT(*) AS total,
-                SUM(CASE WHEN %s IS NOT NULL AND %s <> '' THEN 1 ELSE 0 END) AS translated
-            FROM %s
-            ",
-            BabelSchema::TR_TARGET_LOCALE,
-            BabelSchema::TR_TEXT,
-            BabelSchema::TR_TEXT,
-            $trTable
-        );
+                SUM(CASE WHEN ".BabelSchema::STR_TR_TEXT." IS NOT NULL AND ".BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
+            FROM {$trTable}
+            {$whereSql}
+            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE."
+            ORDER BY ".BabelSchema::STR_TR_TARGET_LOCALE."
+        ";
 
-        if ($locale !== null) {
-            $sql .= " WHERE " . BabelSchema::TR_TARGET_LOCALE . " = :locale";
-            $params['locale'] = $locale;
-        }
-
-        $sql .= " GROUP BY " . BabelSchema::TR_TARGET_LOCALE . " ORDER BY " . BabelSchema::TR_TARGET_LOCALE;
-
-        try {
-            /** @var array<int, array{locale:string,total:string,translated:string}> $rows */
-            $rows = $this->connection->fetchAllAssociative($sql, $params);
-        } catch (\Throwable $e) {
-            $io->error(sprintf('Failed to aggregate per-locale stats: %s', $e->getMessage()));
-
-            return Command::FAILURE;
-        }
-
+        $rows = $this->connection->fetchAllAssociative($sql, $params);
         if ($rows === []) {
-            $io->warning($locale
-                ? sprintf('No rows found in %s for target_locale "%s".', $trTable, $locale)
-                : sprintf('No rows found in %s. Have you flushed any translatable entities yet?', $trTable)
-            );
-
-            if ($terms) {
-                $this->renderTermsOverview($io);
-            }
-
+            $io->warning('No STR_TR rows match the current filters.');
             return Command::SUCCESS;
         }
-
-        $io->section('Per-locale coverage');
 
         $header = ['Locale', 'Rows', 'With text', 'Missing', 'Coverage vs STR'];
         if (!$noBars) {
@@ -136,9 +92,7 @@ final class BabelStatsCommand
             $translated = (int) $r['translated'];
             $missing    = max(0, $total - $translated);
 
-            $coverage = ($totalStr > 0)
-                ? (100.0 * $translated / $totalStr)
-                : 0.0;
+            $coverage = ($totalStr > 0) ? (100.0 * $translated / $totalStr) : 0.0;
 
             $row = [
                 $loc,
@@ -156,54 +110,50 @@ final class BabelStatsCommand
         }
 
         $io->table($header, $tableRows);
-        $io->note('Coverage is computed as: translated STR_TR rows / STR rows, per target locale.');
 
-        if ($terms) {
-            $io->newLine();
-            $this->renderTermsOverview($io);
+        // Engine breakdown (always useful)
+        $io->newLine();
+        $io->section('Engine breakdown');
+
+        $params2 = [];
+        $where2 = [];
+        if ($locale !== null) {
+            $where2[] = BabelSchema::STR_TR_TARGET_LOCALE.' = :locale';
+            $params2['locale'] = $locale;
+        }
+        $whereSql2 = $where2 ? ('WHERE '.implode(' AND ', $where2)) : '';
+
+        $sql2 = "
+            SELECT
+                ".BabelSchema::STR_TR_TARGET_LOCALE." AS locale,
+                COALESCE(".BabelSchema::STR_TR_ENGINE.", '(null)') AS engine,
+                COUNT(*) AS total,
+                SUM(CASE WHEN ".BabelSchema::STR_TR_TEXT." IS NOT NULL AND ".BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
+            FROM {$trTable}
+            {$whereSql2}
+            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE.", ".BabelSchema::STR_TR_ENGINE."
+            ORDER BY ".BabelSchema::STR_TR_TARGET_LOCALE.", engine
+        ";
+
+        $rows2 = $this->connection->fetchAllAssociative($sql2, $params2);
+        if ($rows2) {
+            $io->table(
+                ['Locale', 'Engine', 'Rows', 'With text', 'Missing'],
+                array_map(static function(array $r): array {
+                    $total = (int) $r['total'];
+                    $translated = (int) $r['translated'];
+                    return [
+                        (string) $r['locale'],
+                        (string) $r['engine'],
+                        (string) $total,
+                        (string) $translated,
+                        (string) max(0, $total - $translated),
+                    ];
+                }, $rows2)
+            );
         }
 
         return Command::SUCCESS;
-    }
-
-    private function renderTermsOverview(SymfonyStyle $io): void
-    {
-        $termTable = BabelSchema::TERM_TABLE;
-        $setTable  = BabelSchema::TERM_SET_TABLE;
-
-        try {
-            $setCount  = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$setTable}");
-            $termCount = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$termTable}");
-        } catch (\Throwable $e) {
-            $io->warning(sprintf('Terms overview unavailable: %s', $e->getMessage()));
-            return;
-        }
-
-        $io->section('Terms overview');
-        $io->writeln(sprintf('TermSets (%s): <info>%d</info>', $setTable, $setCount));
-        $io->writeln(sprintf('Terms (%s): <info>%d</info>', $termTable, $termCount));
-
-        $sql = "
-            SELECT s.code AS set_code, COUNT(t.id) AS term_count
-            FROM term_set s
-            LEFT JOIN term t ON t.term_set_id = s.id
-            GROUP BY s.code
-            ORDER BY s.code
-        ";
-
-        try {
-            /** @var array<int, array{set_code:string,term_count:string}> $rows */
-            $rows = $this->connection->fetchAllAssociative($sql);
-        } catch (\Throwable) {
-            return;
-        }
-
-        if ($rows !== []) {
-            $io->table(
-                ['TermSet', 'Terms'],
-                array_map(static fn(array $r) => [$r['set_code'], $r['term_count']], $rows)
-            );
-        }
     }
 
     private function coverageBar(float $pct, int $width = 24): string
@@ -211,7 +161,6 @@ final class BabelStatsCommand
         $pct = max(0.0, min(100.0, $pct));
         $filled = (int) round($pct / 100 * $width);
         $empty  = $width - $filled;
-
         return '[' . str_repeat('#', $filled) . str_repeat('.', $empty) . ']';
     }
 }
