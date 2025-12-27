@@ -8,7 +8,7 @@ final class BabelSchema
     public const string STR_TABLE = 'str';
     public const string STR_TR_TABLE = 'str_tr';
     public const string TERM_SET_TABLE = 'term_set';
-    public const string TERM_TABLE = 'term';
+    public const string TERM_TABLE = 'babel_term';
 
     /** @deprecated Use STR_TABLE */
     public const string STRING_TABLE = self::STR_TABLE;
