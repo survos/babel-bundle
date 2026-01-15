@@ -5,6 +5,8 @@ namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Survos\BabelBundle\Entity\Str;
+use Survos\BabelBundle\Entity\StrTranslation;
 use Survos\BabelBundle\Entity\Base\StrBase;
 use Survos\BabelBundle\Entity\Base\StrTranslationBase;
 use Survos\BabelBundle\Event\TranslateStringEvent;
@@ -13,63 +15,97 @@ use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
-use Symfony\Component\Console\Attribute\Ask;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Question\ChoiceQuestion;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
-#[AsCommand('babel:translate', 'Translate blank StrTranslation rows for target locale(s) (event-first, optional TranslatorBundle fallback)')]
+#[AsCommand(
+    'babel:translate',
+    'Translate blank StrTranslation rows for target locale(s) (event-first, optional TranslatorBundle fallback)'
+)]
 final class TranslateCommand
 {
     public function __construct(
-        private readonly EntityManagerInterface   $em,
-        private readonly LoggerInterface          $logger,
-        private readonly LocaleContext            $localeContext,
-        private readonly EventDispatcherInterface $dispatcher,
-        private readonly TranslatableIndex        $index,
-        private readonly ?ExternalTranslatorBridge $bridge = null, // soft dep; may be null
-    ) {}
+        private readonly EntityManagerInterface    $em,
+        private readonly LoggerInterface           $logger,
+        private readonly LocaleContext             $localeContext,
+        private readonly EventDispatcherInterface  $dispatcher,
+        private readonly TranslatableIndex         $index,
+        private readonly ?ExternalTranslatorBridge $bridge = null, // soft dependency
+    ) {
+    }
 
-    public function getEnabledLocales(): array
+    /**
+     * @return list<string>
+     */
+    private function enabledLocales(): array
     {
-        return $this->localeContext->getEnabled();
+        $enabled = $this->localeContext->getEnabled();
+        if ($enabled !== []) {
+            return array_values(array_unique($enabled));
+        }
 
+        $default = $this->localeContext->getDefault();
+        return $default ? [$default] : [];
     }
 
     public function __invoke(
         SymfonyStyle $io,
-        InputInterface $input,
-        #[Argument()]
-//        #[Argument(suggestedValues: [self::class, 'getSuggestedEnabledLocales']), Ask('Enter the locale name')]
-        ?string $localesArg=null,
-        #[Option('Use all framework.enabled_locales when locales argument is empty')] bool $all = false,
-        #[Option('Limit number to translate per locale (0 = unlimited)')] int $limit = 0,
-        #[Option('batch flush')] int $batch = 10,
-        #[Option('Dry-run: do not write')] bool $dryRun = false,
-        #[Option('Engine name (TranslatorBundle). If omitted and bundle is present, uses default engine.')] ?string $engine = null,
-        #[Option('Str entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrBase)')] string $strClass = 'App\\Entity\\Str',
-        #[Option('StrTranslation entity FQCN (must extend Survos\\BabelBundle\\Entity\\Base\\StrTranslationBase)')] string $trClass  = 'App\\Entity\\StrTranslation',
-        #[Option('Override *source* locale when Str.srcLocale is null')] ?string $srcLocaleOverride = null,
+
+        #[Argument('Target locales CSV (e.g. "es,fr"). If omitted, you will be prompted.')]
+        ?string $localesArg = null,
+
+        #[Option('Use all framework.enabled_locales when locales argument is empty')]
+        bool $all = false,
+
+        #[Option('Limit number to translate per locale (0 = unlimited)')]
+        int $limit = 0,
+
+        #[Option('Batch size for flush/clear')]
+        int $batch = 50,
+
+        #[Option('Dry-run: do not write')]
+        bool $dryRun = false,
+
+        #[Option('Engine name (TranslatorBundle). If omitted and bundle is present, uses default engine.')]
+        ?string $engine = null,
+
+        #[Option('Str entity FQCN (must extend StrBase)')]
+        string $strClass = Str::class,
+
+        #[Option('StrTranslation entity FQCN (must extend StrTranslationBase)')]
+        string $trClass = StrTranslation::class,
+
+        #[Option('Override *source* locale when Str.sourceLocale is empty')]
+        ?string $srcLocaleOverride = null,
     ): int {
-        if (!$localesArg) {
-            $localesArg = $io->askQuestion(new ChoiceQuestion("To which locale?", $this->getEnabledLocales()));
+        // Prompt if no locales provided and not --all
+        if (!$localesArg && !$all) {
+            $choices = $this->enabledLocales();
+            if ($choices === []) {
+                $io->error('No enabled locales found (and no default locale).');
+                return Command::FAILURE;
+            }
+
+            $localesArg = (string) $io->askQuestion(
+                new ChoiceQuestion('Translate to which locale?', $choices)
+            );
         }
-        // Optional global source-locale override for this run
+
+        $targets = $this->resolveTargetLocales($io, $localesArg, $all);
+        if ($targets === null) {
+            $io->warning('No target locales found.');
+            return Command::FAILURE;
+        }
+
+        // Optional global source-locale override
         if ($srcLocaleOverride) {
             $this->localeContext->set($srcLocaleOverride);
         }
 
-        // Resolve target locales
-        $targets = $this->resolveTargetLocales($io, $localesArg, $all);
-        if ($targets === null) {
-            $io->warning("No target locales found.");
-            return Command::FAILURE;
-        }
-
-        // If the user explicitly asked for an engine but the bridge is unavailable, fail early
+        // Engine requested but TranslatorBundle missing
         if ($engine !== null && (!$this->bridge || !$this->bridge->isAvailable())) {
             $io->error(implode("\n", [
                 'The --engine option requires SurvosTranslatorBundle.',
@@ -79,17 +115,17 @@ final class TranslateCommand
             return Command::FAILURE;
         }
 
-        // Entity checks
+        // Entity sanity checks
         if (!class_exists($strClass) || !class_exists($trClass)) {
-            $io->error('Str/StrTranslation classes not found.');
+            $io->error('Str / StrTranslation class not found.');
             return Command::FAILURE;
         }
         if (!is_a($strClass, StrBase::class, true)) {
-            $io->error(sprintf('Str class must extend %s.', StrBase::class));
+            $io->error('Str class must extend StrBase.');
             return Command::FAILURE;
         }
         if (!is_a($trClass, StrTranslationBase::class, true)) {
-            $io->error(sprintf('StrTranslation class must extend %s.', StrTranslationBase::class));
+            $io->error('StrTranslation class must extend StrTranslationBase.');
             return Command::FAILURE;
         }
 
@@ -101,11 +137,12 @@ final class TranslateCommand
         foreach ($targets as $targetLocale) {
             $io->section(sprintf('Locale: %s', $targetLocale));
 
-            // Only blank texts (NULL or empty string)
             $qb = $trRepo->createQueryBuilder('t')
-                ->andWhere('t.locale = :loc')->setParameter('loc', $targetLocale)
+                ->andWhere('t.targetLocale = :loc')->setParameter('loc', $targetLocale)
                 ->andWhere('(t.text IS NULL OR t.text = \'\')')
-                ->orderBy('t.hash', 'ASC');
+                ->andWhere('t.status = :status')->setParameter('status', StrTranslationBase::STATUS_NEW)
+                ->orderBy('t.strCode', 'ASC');
+
             if ($limit > 0) {
                 $qb->setMaxResults($limit);
             }
@@ -115,75 +152,77 @@ final class TranslateCommand
 
             foreach ($iter as $tr) {
                 /** @var StrTranslationBase $tr */
-                $trHash    = $tr->hash;      // translation key (e.g. "<strHash>-<locale>")
-                $sourceKey = $tr->strHash ?? null; // ✅ canonical pointer to Str.hash
+                $code = $tr->strCode ?? null;
 
-                if (!$sourceKey) {
-                    $this->logger->warning('StrTranslation missing str_hash; skipping.', [
-                        'tr.hash' => $trHash,
-                        'locale'  => $targetLocale,
+                if (!$code) {
+                    $this->logger->warning('StrTranslation missing strCode; skipping.', [
+                        'locale' => $targetLocale,
                     ]);
                     $done++;
                     continue;
                 }
 
                 /** @var StrBase|null $str */
-                $str = $strRepo->find($sourceKey); // ✅ look up by Str.hash, not by TR.hash
+                $str = $strRepo->findOneBy(['code' => $code]);
                 if (!$str) {
                     $this->logger->warning('Missing Str for StrTranslation; skipping.', [
-                        'tr.hash'   => $trHash,
-                        'tr.locale' => $targetLocale,
-                        'str_hash'  => $sourceKey,
+                        'str_code' => $code,
+                        'locale'   => $targetLocale,
                     ]);
                     $done++;
                     continue;
                 }
 
+                $srcLocale = $this->resolveSourceLocaleForStr($str);
+
                 // Skip same-locale “translation”
-                if ($str->srcLocale === $tr->locale) {
+                if ($srcLocale === $targetLocale) {
                     $done++;
                     continue;
                 }
 
-                $original  = (string) $str->original;
-                $srcLocale = $this->resolveSourceLocaleForStr($str);
+                $original = $str->source;
 
-                // 1) EVENT FIRST: let listeners provide a translation
-                $evt = new TranslateStringEvent(
-                    hash:         $sourceKey,     // ✅ pass the STR key (source), not the TR key
+                // 1) EVENT FIRST
+                $event = new TranslateStringEvent(
+                    hash:         $code,          // canonical STR key
                     original:     $original,
                     sourceLocale: $srcLocale,
                     targetLocale: $targetLocale,
                     translated:   null
                 );
-                $this->dispatcher->dispatch($evt);
-                $translated = $evt->translated;
+                $this->dispatcher->dispatch($event);
+                $translated = $event->translated;
 
-                // 2) FALLBACK: TranslatorBundle (if present). If no --engine passed, use default engine.
-                if (($translated === null || $translated === '') && $this->bridge && $this->bridge->isAvailable()) {
+                // 2) FALLBACK: TranslatorBundle
+                if (($translated === null || $translated === '')
+                    && $this->bridge
+                    && $this->bridge->isAvailable()
+                ) {
                     try {
                         $result     = $this->bridge->translate($original, $srcLocale, $targetLocale, $engine);
                         $translated = (string) ($result['translatedText'] ?? '');
                     } catch (\Throwable $e) {
-                        $this->logger->warning('TranslatorBundle fallback failed', [
-                            'str_hash' => $sourceKey, 'src' => $srcLocale, 'dst' => $targetLocale, 'err' => $e->getMessage(),
+                        $this->logger->warning('Translator fallback failed', [
+                            'str_code' => $code,
+                            'src'      => $srcLocale,
+                            'dst'      => $targetLocale,
+                            'err'      => $e->getMessage(),
                         ]);
                         $translated = null;
                     }
                 }
 
-                // Nothing to write?
                 if ($translated === null || $translated === '') {
                     $done++;
                     continue;
                 }
 
                 if (!$dryRun) {
-                    // public props; if your entity has updatedAt, touch it
-                    $tr->text = $translated;
-                    if (\property_exists($tr, 'updatedAt')) {
-                        $tr->updatedAt = new \DateTimeImmutable();
-                    }
+                    $tr->text      = $translated;
+                    $tr->status    = StrTranslationBase::STATUS_TRANSLATED;
+                    $tr->engine    = $engine;
+                    $tr->updatedAt = new \DateTimeImmutable();
                 }
 
                 $done++;
@@ -194,15 +233,12 @@ final class TranslateCommand
                     $this->em->clear();
                     $strRepo = $this->em->getRepository($strClass);
                     $trRepo  = $this->em->getRepository($trClass);
-                    $io->success(sprintf('Locale %s: processed %d row(s).', $targetLocale, $done));
                 }
             }
 
             if (!$dryRun) {
                 $this->em->flush();
                 $this->em->clear();
-                $strRepo = $this->em->getRepository($strClass);
-                $trRepo  = $this->em->getRepository($trClass);
             }
 
             $io->success(sprintf('Locale %s: processed %d row(s).', $targetLocale, $done));
@@ -216,36 +252,51 @@ final class TranslateCommand
         return Command::SUCCESS;
     }
 
-    /** @return list<string>|null */
-    private function resolveTargetLocales(SymfonyStyle $io, ?string $localesArg, bool $all): ?array
-    {
-        if ($localesArg && \trim($localesArg) !== '') {
+    /**
+     * @return list<string>|null
+     */
+    private function resolveTargetLocales(
+        SymfonyStyle $io,
+        ?string $localesArg,
+        bool $all
+    ): ?array {
+        if ($localesArg && trim($localesArg) !== '') {
             $targets = array_values(array_filter(array_map('trim', explode(',', $localesArg))));
             return $targets !== [] ? $targets : null;
         }
+
         if ($all) {
-            $locales = $this->localeContext->getEnabled() ?: [$this->localeContext->getDefault()];
+            $locales = $this->enabledLocales();
             if ($locales === []) {
                 $io->warning('No enabled locales found.');
                 return null;
             }
-            return array_values(array_unique($locales));
+            return $locales;
         }
+
         $io->warning('Specify locales (e.g. "es,fr") or pass --all.');
         return null;
     }
 
     private function resolveSourceLocaleForStr(object $str): string
     {
-        $acc = $this->index->localeAccessorFor($str::class) ?? ['type'=>'prop','name'=>'srcLocale','format'=>null];
-        if ($acc['type']==='prop' && \property_exists($str, $acc['name'])) {
+        $acc = $this->index->localeAccessorFor($str::class)
+            ?? ['type' => 'prop', 'name' => 'sourceLocale'];
+
+        if ($acc['type'] === 'prop' && property_exists($str, $acc['name'])) {
             $v = $str->{$acc['name']} ?? null;
-            if (\is_string($v) && $v !== '') return $v;
+            if (is_string($v) && $v !== '') {
+                return $v;
+            }
         }
-        if ($acc['type']==='method' && \method_exists($str, $acc['name'])) {
+
+        if ($acc['type'] === 'method' && method_exists($str, $acc['name'])) {
             $v = $str->{$acc['name']}();
-            if (\is_string($v) && $v !== '') return $v;
+            if (is_string($v) && $v !== '') {
+                return $v;
+            }
         }
+
         return $this->localeContext->getDefault();
     }
 }
