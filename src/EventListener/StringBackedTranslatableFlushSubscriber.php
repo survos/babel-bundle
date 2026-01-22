@@ -69,10 +69,12 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
         }
 
         if ($this->debug) {
-            $this->logger->debug('Babel onFlush: collected', [
-                'pending_str' => \count($this->pending),
-                'pending_tr'  => \count($this->pendingWithText),
-            ]);
+            if (count($this->pending) || count($this->pendingWithText)) {
+                $this->logger->debug('Babel onFlush: collected', [
+                    'pending_str' => \count($this->pending),
+                    'pending_tr' => \count($this->pendingWithText),
+                ]);
+            }
         }
     }
 
