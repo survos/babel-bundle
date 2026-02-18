@@ -50,7 +50,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
             foreach ($this->scanPhpFiles($dir) as $file) {
                 $fqcn = $this->classFromFile($file, $dir, $prefix);
-                if (!$fqcn || !\class_exists($fqcn)) {
+                if (!$fqcn || !$this->classExistsSafely($fqcn)) {
                     continue;
                 }
 
@@ -329,5 +329,14 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         return ($parent = $rc->getParentClass())
             ? $this->classUsesTraitRecursive($parent, $traitFqcn)
             : false;
+    }
+
+    private function classExistsSafely(string $fqcn): bool
+    {
+        try {
+            return \class_exists($fqcn);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }
