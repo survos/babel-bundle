@@ -14,7 +14,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 #[AsCommand('babel:preview', 'Preview Doctrine-hydrated translatable fields under a given locale')]
-final class BabelPreviewCommand extends Command
+final class BabelPreviewCommand
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
@@ -23,7 +23,6 @@ final class BabelPreviewCommand extends Command
         #[Autowire(param: 'survos_babel.scan_namespaces')]
         private readonly array $scanNamespaces = [],
     ) {
-        parent::__construct();
     }
 
     public function __invoke(
