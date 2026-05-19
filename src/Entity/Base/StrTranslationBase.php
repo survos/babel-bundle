@@ -52,6 +52,6 @@ abstract class StrTranslationBase
      * DB-level default avoids INSERT OR IGNORE silently discarding rows on SQLite
      * when meta is NOT NULL but has no DEFAULT.
      */
-    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true, 'default' => '[]'])]
+    #[ORM\Column(type: Types::JSONB, options: ['default' => '[]'])]
     public array $meta = [];
 }

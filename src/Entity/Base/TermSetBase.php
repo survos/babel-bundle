@@ -26,10 +26,10 @@ abstract class TermSetBase
     #[ORM\Column(length: 64, nullable: true)]
     public ?string $descriptionCode = null;
 
-    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true])]
+    #[ORM\Column(type: Types::JSONB)]
     public array $rules = [];
 
-    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true])]
+    #[ORM\Column(type: Types::JSONB)]
     public array $meta = [];
 
     #[ORM\Column]

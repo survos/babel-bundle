@@ -35,6 +35,6 @@ abstract class StrBase
      * Important: set a DB-level default so bulk inserts that omit meta do not fail
      * on platforms (notably SQLite) where NOT NULL JSON may otherwise have no DEFAULT.
      */
-    #[ORM\Column(type: Types::JSON, options: ['jsonb' => true, 'default' => '[]'])]
+    #[ORM\Column(type: Types::JSONB, options: ['default' => '[]'])]
     public array $meta = [];
 }
