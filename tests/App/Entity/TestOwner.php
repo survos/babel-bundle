@@ -6,7 +6,7 @@ namespace Survos\BabelBundle\Tests\App\Entity;
 use Doctrine\ORM\Mapping as ORM;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Contract\BabelHooksInterface;
 use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 

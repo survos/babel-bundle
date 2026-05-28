@@ -8,7 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Survos\BabelBundle\Attribute\BabelStorage;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Debug\BabelDebugRecorderInterface;
 use Survos\BabelBundle\Service\LocaleContext;
 use Symfony\Component\HttpFoundation\RequestStack;

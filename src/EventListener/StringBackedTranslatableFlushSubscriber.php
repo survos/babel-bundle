@@ -13,7 +13,7 @@ use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TargetLocaleResolver;

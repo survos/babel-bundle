@@ -7,7 +7,7 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Survos\BabelBundle\Attribute\BabelTerm;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;

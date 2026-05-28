@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\App\Entity;
 
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Contract\BabelHooksInterface;
 use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 

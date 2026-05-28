@@ -6,7 +6,7 @@ namespace Survos\BabelBundle\DependencyInjection\Compiler;
 use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\BabelTerm;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Survos\BabelBundle\Contract\BabelHooksInterface;

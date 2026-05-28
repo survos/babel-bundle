@@ -6,7 +6,7 @@ namespace Survos\BabelBundle\Service\Scanner;
 use Doctrine\Persistence\ManagerRegistry;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\StorageMode;
-use Survos\BabelBundle\Attribute\Translatable;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 
 /**
  * Builds a map of translatable fields per entity class.
