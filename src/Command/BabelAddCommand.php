@@ -443,5 +443,7 @@ PHPX);
     public function handleSignal(int $signal, false|int $previousExitCode = 0): int|false
     {
         $this->shouldStop = true;
+
+        return false;
     }
 }
