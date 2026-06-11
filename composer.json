@@ -19,7 +19,6 @@
         "survos/lingua-core": "^2.5"
     },
     "require-dev": {
-        "roave/security-advisories": "dev-latest",
         "nikic/php-parser": "^5.6",
         "nette/php-generator": "^4.1",
         "phpstan/phpstan": "^2.0",
