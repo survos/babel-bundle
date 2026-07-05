@@ -27,17 +27,25 @@ final class BabelTranslationLoader implements LoaderInterface
         $strClass = class_exists('App\\Entity\\Str') ? 'App\\Entity\\Str' : Str::class;
         $trClass = class_exists('App\\Entity\\StrTranslation') ? 'App\\Entity\\StrTranslation' : StrTranslation::class;
 
-        $rows = $this->em->createQueryBuilder()
-            ->select('s.code AS code, s.meta AS meta, t.text AS text')
-            ->from($strClass, 's')
-            ->join($trClass, 't', 'WITH', 't.strCode = s.code')
-            ->andWhere('s.context = :domain')
-            ->andWhere('t.targetLocale = :locale')
-            ->andWhere('t.text IS NOT NULL')
-            ->setParameter('domain', $domain)
-            ->setParameter('locale', $locale)
-            ->getQuery()
-            ->getArrayResult();
+        try {
+            $rows = $this->em->createQueryBuilder()
+                ->select('s.code AS code, s.meta AS meta, t.text AS text')
+                ->from($strClass, 's')
+                ->join($trClass, 't', 'WITH', 't.strCode = s.code')
+                ->andWhere('s.context = :domain')
+                ->andWhere('t.targetLocale = :locale')
+                ->andWhere('t.text IS NOT NULL')
+                ->setParameter('domain', $domain)
+                ->setParameter('locale', $locale)
+                ->getQuery()
+                ->getArrayResult();
+        } catch (\Doctrine\DBAL\Exception $e) {
+            // The translator's catalogue warmup runs this eagerly (e.g. during cache:clear), which
+            // would otherwise hard-fail a build/deploy on a schema that hasn't been migrated yet --
+            // an empty catalogue degrades to untranslated source strings instead ("publish what we
+            // can"), same fallback philosophy as the rest of this translation pipeline.
+            return new MessageCatalogue($locale, [$domain => []]);
+        }
 
         $translations = [];
         foreach ($rows as $row) {
