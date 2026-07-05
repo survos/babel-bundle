@@ -8,7 +8,7 @@ use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\MariaDBPlatform;
 use Doctrine\DBAL\Platforms\MySQLPlatform;
 use Doctrine\DBAL\Platforms\PostgreSQLPlatform;
-use Doctrine\DBAL\Platforms\SqlitePlatform;
+use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
@@ -122,7 +122,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 try {
                     $conn->executeStatement($sqlStrUpsert, $params);
                 } catch (\Throwable $e) {
-                    if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
+                    if ($pf instanceof SQLitePlatform && $this->isSqliteConflictTargetError($e)) {
                         $this->sqliteStrUpsertFallback($conn, $strTable, $params);
                     } else {
                         $this->logPhaseError('STR_UPSERT', $sqlStrUpsert, $params, $e);
@@ -149,7 +149,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                     try {
                         $conn->executeStatement($sqlTrEnsure, $params);
                     } catch (\Throwable $e) {
-                        if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
+                        if ($pf instanceof SQLitePlatform && $this->isSqliteConflictTargetError($e)) {
                             $this->sqliteTrEnsureFallback($conn, $trTable, $params);
                         } else {
                             $this->logPhaseError('TR_ENSURE', $sqlTrEnsure, $params, $e);
@@ -176,7 +176,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                 try {
                     $conn->executeStatement($sqlTrUpsert, $params);
                 } catch (\Throwable $e) {
-                    if ($pf instanceof SqlitePlatform && $this->isSqliteConflictTargetError($e)) {
+                    if ($pf instanceof SQLitePlatform && $this->isSqliteConflictTargetError($e)) {
                         $this->sqliteTrUpsertFallback($conn, $trTable, $params);
                     } else {
                         $this->logPhaseError('TR_UPSERT', $sqlTrUpsert, $params, $e);
@@ -222,7 +222,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                           meta         = EXCLUDED.meta";
         }
 
-        if ($pf instanceof SqlitePlatform) {
+        if ($pf instanceof SQLitePlatform) {
             return "INSERT INTO {$strTable} (code, source_locale, source, context, meta)
                     VALUES (:code, :source_locale, :source, :context, :meta)
                     ON CONFLICT(code) DO UPDATE SET
@@ -253,7 +253,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                     ON CONFLICT (str_code, target_locale, engine) DO NOTHING";
         }
 
-        if ($pf instanceof SqlitePlatform) {
+        if ($pf instanceof SQLitePlatform) {
             return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
                     VALUES (:str_code, :target_locale, :engine, NULL, :meta)
                     ON CONFLICT(str_code, target_locale, engine) DO NOTHING";
@@ -274,7 +274,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
                           meta = EXCLUDED.meta";
         }
 
-        if ($pf instanceof SqlitePlatform) {
+        if ($pf instanceof SQLitePlatform) {
             return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
                     VALUES (:str_code, :target_locale, :engine, :text, :meta)
                     ON CONFLICT(str_code, target_locale, engine) DO UPDATE SET

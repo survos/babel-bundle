@@ -18,7 +18,12 @@ final class BabelRuntimeRequestSubscriber implements EventSubscriberInterface
 
     public static function getSubscribedEvents(): array
     {
-        return [ KernelEvents::REQUEST => ['onKernelRequest', 64] ];
+        // Must run after routing AND after whatever app-level locale subscriber resolves the
+        // final request locale (LocaleContext::get() lazily resolves and caches on first call --
+        // priority 64 ran before Symfony's own LocaleListener/LocaleAwareListener (16/15) and any
+        // app subscriber sitting between them, so it locked in a stale locale before the real one
+        // was ever set). Low priority here means "run last".
+        return [ KernelEvents::REQUEST => ['onKernelRequest', 8] ];
     }
 
     public function onKernelRequest(RequestEvent $event): void

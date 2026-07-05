@@ -31,8 +31,12 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 {
     public function process(ContainerBuilder $container): void
     {
+        // This pass runs at TYPE_BEFORE_OPTIMIZATION, before Symfony's own
+        // ResolveParameterPlaceHoldersPass (TYPE_OPTIMIZE) has resolved %...%
+        // placeholders -- so a %kernel.project_dir%-based scan_roots key/value
+        // would still be literal text here unless resolved explicitly.
         $rootsParam = $container->hasParameter('survos_babel.scan_roots')
-            ? (array) $container->getParameter('survos_babel.scan_roots')
+            ? (array) $container->getParameterBag()->resolveValue($container->getParameter('survos_babel.scan_roots'))
             : [];
 
         if (!$rootsParam) {

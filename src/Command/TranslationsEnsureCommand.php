@@ -135,11 +135,23 @@ final class TranslationsEnsureCommand
 
             // IMPORTANT: if your schema has a UNIQUE on (str_code,target_locale) this is correct.
             // If your schema uniqueness includes engine, you should migrate it; otherwise duplicates remain possible.
+            $platform = $this->db->getDatabasePlatform();
+            $insertVerb = 'INSERT INTO';
+            $conflictClause = ' ON CONFLICT DO NOTHING'; // postgresql and other standard-SQL platforms
+            if ($platform instanceof \Doctrine\DBAL\Platforms\SQLitePlatform) {
+                $insertVerb = 'INSERT OR IGNORE INTO';
+                $conflictClause = '';
+            } elseif ($platform instanceof \Doctrine\DBAL\Platforms\AbstractMySQLPlatform) {
+                $insertVerb = 'INSERT IGNORE INTO';
+                $conflictClause = '';
+            }
+
             $insertSql = sprintf(
-                'INSERT OR IGNORE INTO %s (%s, %s, %s, %s, %s, %s)
+                '%s %s (%s, %s, %s, %s, %s, %s)
                  SELECT s.%s, :loc, :eng, NULL, :st, :meta
                  FROM %s s
-                 WHERE s.%s <> :loc%s%s',
+                 WHERE s.%s <> :loc%s%s%s',
+                $insertVerb,
                 BabelSchema::STR_TR_TABLE,
                 BabelSchema::STR_TR_STR_CODE,
                 BabelSchema::STR_TR_TARGET_LOCALE,
@@ -151,7 +163,8 @@ final class TranslationsEnsureCommand
                 BabelSchema::STR_TABLE,
                 BabelSchema::STR_SOURCE_LOCALE,
                 $filterSql,
-                $limit > 0 ? (' LIMIT ' . (int) $limit) : ''
+                $limit > 0 ? (' LIMIT ' . (int) $limit) : '',
+                $conflictClause
             );
 
             $affected = (int) $this->db->executeStatement($insertSql, $params + ['meta' => $metaJson]);

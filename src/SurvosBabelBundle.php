@@ -93,6 +93,13 @@ final class SurvosBabelBundle extends AbstractBundle
             ->addTag('doctrine.event_listener', ['event' => Events::onFlush])
             ->addTag('doctrine.event_listener', ['event' => Events::postFlush]);
 
+        // Bridges babel storage (Str/StrTranslation) into Symfony's live translator catalogue.
+        // Resource files named "<domain>.<locale>.babel" trigger this loader for that domain/locale.
+        $builder->register(\Survos\BabelBundle\Translation\BabelTranslationLoader::class)
+            ->setAutowired(true)
+            ->setAutoconfigured(true)
+            ->addTag('translation.loader', ['alias' => 'babel']);
+
         $builder->register(ExternalTranslatorBridge::class)
             ->setAutowired(false)
             ->setAutoconfigured(false)
