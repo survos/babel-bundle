@@ -18,8 +18,6 @@ use Survos\Lingua\Core\Identity\HashUtil;
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelPostLoadHydrator
 {
-    public const string DEFAULT_ENGINE = 'babel';
-
     public function __construct(
         private readonly TranslatableIndex $index,
         private readonly LocaleContext $locale,
@@ -75,24 +73,26 @@ final class BabelPostLoadHydrator
                 }
 
                 if ($fieldToStrCode !== []) {
+                    // No engine filter: `engine` records real provenance (libre/deepl/...),
+                    // not a "this is the canonical row" marker — the old 'babel' constant
+                    // conflated the two. One StrTranslation row per (str_code, target_locale)
+                    // is the current invariant, so whichever row is there is the one to show.
                     $sql = sprintf(
                         'SELECT tr.%s AS str_code, tr.%s AS text
                          FROM %s tr
                          WHERE tr.%s IN (?)
-                           AND tr.%s = ?
                            AND tr.%s = ?',
                         BabelSchema::STR_TR_STR_CODE,
                         BabelSchema::STR_TR_TEXT,
                         BabelSchema::STR_TR_TABLE,
                         BabelSchema::STR_TR_STR_CODE,
-                        BabelSchema::STR_TR_TARGET_LOCALE,
-                        BabelSchema::STR_TR_ENGINE
+                        BabelSchema::STR_TR_TARGET_LOCALE
                     );
 
                     $rows = $conn->executeQuery(
                         $sql,
-                        [\array_values($fieldToStrCode), $displayLocale, self::DEFAULT_ENGINE],
-                        [ArrayParameterType::STRING, ParameterType::STRING, ParameterType::STRING]
+                        [\array_values($fieldToStrCode), $displayLocale],
+                        [ArrayParameterType::STRING, ParameterType::STRING]
                     )->fetchAllAssociative();
 
                     $byStrCode = [];
@@ -220,25 +220,24 @@ final class BabelPostLoadHydrator
 
         $labelCodes = array_values(array_unique($labelCodes));
 
-        // Fetch translations for those label codes
+        // Fetch translations for those label codes. No engine filter — see the comment on
+        // the other query in this class for why.
         $sqlTr = sprintf(
             'SELECT tr.%s AS str_code, tr.%s AS text
              FROM %s tr
              WHERE tr.%s IN (?)
-               AND tr.%s = ?
                AND tr.%s = ?',
             BabelSchema::STR_TR_STR_CODE,
             BabelSchema::STR_TR_TEXT,
             BabelSchema::STR_TR_TABLE,
             BabelSchema::STR_TR_STR_CODE,
-            BabelSchema::STR_TR_TARGET_LOCALE,
-            BabelSchema::STR_TR_ENGINE
+            BabelSchema::STR_TR_TARGET_LOCALE
         );
 
         $trRows = $conn->executeQuery(
             $sqlTr,
-            [$labelCodes, $displayLocale, self::DEFAULT_ENGINE],
-            [ArrayParameterType::STRING, ParameterType::STRING, ParameterType::STRING]
+            [$labelCodes, $displayLocale],
+            [ArrayParameterType::STRING, ParameterType::STRING]
         )->fetchAllAssociative();
 
         $textByLabelCode = [];
