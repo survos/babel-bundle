@@ -54,7 +54,20 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
             foreach ($this->scanPhpFiles($dir) as $file) {
                 $fqcn = $this->classFromFile($file, $dir, $prefix);
-                if (!$fqcn || !$this->classExistsSafely($fqcn)) {
+                // classFromFile() guesses the FQCN purely from the file's path relative to
+                // $dir/$prefix -- it never looks at the file's actual `namespace` statement.
+                // That guess is wrong for any subtree that legitimately declares a different
+                // namespace (e.g. an in-app bundle incubating under a scanned App root, see
+                // survos-sites/ssai). A wrong guess can still resolve to a real file via a
+                // PSR-4 autoloader that's equally naive about path-vs-namespace (composer's
+                // "Foo\\": "src/" is a pure path mapping) -- class_exists() on the wrong name
+                // then re-includes that file and fatals with "Cannot redeclare class" for
+                // whatever the file's REAL class actually is. Verify the guess against the
+                // file's real declared namespace before ever calling class_exists() on it.
+                if (!$fqcn || !$this->classFromFileMatchesDeclaredNamespace($file, $fqcn)) {
+                    continue;
+                }
+                if (!$this->classExistsSafely($fqcn)) {
                     continue;
                 }
 
@@ -94,6 +107,31 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         }
 
         return $prefix . '\\' . \str_replace('/', '\\', \substr($rel, 0, -4));
+    }
+
+    /**
+     * Cheap guard, no autoloading involved: reads just enough of $file to find its real
+     * `namespace` statement and compares it against the namespace classFromFile() guessed
+     * from the path. A mismatch means $file does not actually belong under $prefix (a
+     * differently-namespaced subtree living inside a scanned root) -- skip it rather than
+     * ever calling class_exists() on the wrong name.
+     */
+    private function classFromFileMatchesDeclaredNamespace(string $file, string $fqcn): bool
+    {
+        $expectedNamespace = \trim(\substr($fqcn, 0, (int) \strrpos($fqcn, '\\')), '\\');
+
+        $head = @\file_get_contents($file, false, null, 0, 8192);
+        if (false === $head) {
+            return false;
+        }
+
+        if (!\preg_match('/^\s*namespace\s+([^;{\s]+)/m', $head, $m)) {
+            // No namespace statement found at all -- only a real match if the guess was
+            // itself namespace-less, which never happens here since $prefix is non-empty.
+            return '' === $expectedNamespace;
+        }
+
+        return \trim($m[1], '\\') === $expectedNamespace;
     }
 
     /**
