@@ -8,6 +8,7 @@ use Survos\BabelBundle\Entity\Str;
 use Survos\BabelBundle\Entity\StrTranslation;
 use Survos\BabelBundle\Entity\Term;
 use Survos\BabelBundle\Entity\TermSet;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * Minimal WIP registry for controlled vocabulary.
@@ -15,7 +16,7 @@ use Survos\BabelBundle\Entity\TermSet;
  * Important: repository queries won't see scheduled inserts until flush(), so we cache ensures.
  * Also: to participate in babel:push/babel:pull (stub-driven), we create STR_TR stubs for term labels.
  */
-final class TermRegistry
+final class TermRegistry implements ResetInterface
 {
     /** @var array<string, TermSet> */
     private array $setCache = [];
@@ -201,5 +202,20 @@ final class TermRegistry
 
         // Safe default: do nothing (no stubs => no pushes)
         return [];
+    }
+
+    /**
+     * $setCache and $termCache hold *managed* Doctrine entities. Under FrankenPHP worker mode
+     * the service outlives the response, so without this each one would be retained for the
+     * life of the process AND be detached the moment the entity manager is cleared -- handing
+     * later requests stale objects that no longer belong to any EM. The caches exist to bridge
+     * "repository queries won't see scheduled inserts until flush()" within one unit of work,
+     * which the request boundary ends anyway.
+     */
+    public function reset(): void
+    {
+        $this->setCache = [];
+        $this->termCache = [];
+        $this->strCache = [];
     }
 }

@@ -19,8 +19,9 @@ use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TargetLocaleResolver;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\Lingua\Core\Identity\HashUtil;
+use Symfony\Contracts\Service\ResetInterface;
 
-final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
+final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, ResetInterface
 {
     public const string BABEL_ENGINE = 'babel';
 
@@ -440,5 +441,17 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber
             'sql'       => $sql,
             'params'    => $params,
         ]);
+    }
+
+    /**
+     * A request that dies between onFlush() and postFlush() leaves rows queued and, worse,
+     * $inPostFlush stuck at true -- which under FrankenPHP worker mode would silently disable
+     * translation persistence for every subsequent request the worker serves.
+     */
+    public function reset(): void
+    {
+        $this->pending = [];
+        $this->pendingWithText = [];
+        $this->inPostFlush = false;
     }
 }
