@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -27,14 +28,11 @@ final class StringStorageRouter
 
         // Property-mode if the class is in our compile-time index
         $class = $carrier::class;
-        if ($this->index->fieldsFor($class) !== []) {
+        if ([] !== $this->index->fieldsFor($class)) {
             return $this->property;
         }
 
-        throw new \RuntimeException(sprintf(
-            'No storage engine available for %s (not CodeStringCarrier and no translatable fields found).',
-            $class
-        ));
+        throw new \RuntimeException(sprintf('No storage engine available for %s (not CodeStringCarrier and no translatable fields found).', $class));
     }
 
     /** Convenience pass-through used by ingestion code. */

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -17,7 +18,8 @@ final class BabelStrCommand
 {
     public function __construct(
         private readonly Connection $db,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -35,56 +37,57 @@ final class BabelStrCommand
         $params = [];
 
         if ($sourceLocale) {
-            $where[] = 's.' . BabelSchema::STR_SOURCE_LOCALE . ' = :sl';
+            $where[] = 's.'.BabelSchema::STR_SOURCE_LOCALE.' = :sl';
             $params['sl'] = $sourceLocale;
         }
 
         if ($context) {
-            $where[] = 's.' . BabelSchema::STR_CONTEXT . ' LIKE :ctx';
-            $params['ctx'] = '%' . $context . '%';
+            $where[] = 's.'.BabelSchema::STR_CONTEXT.' LIKE :ctx';
+            $params['ctx'] = '%'.$context.'%';
         }
 
         if ($q) {
-            $where[] = '(s.' . BabelSchema::STR_CODE . ' LIKE :q OR s.' . BabelSchema::STR_SOURCE . ' LIKE :q OR s.' . BabelSchema::STR_CONTEXT . ' LIKE :q)';
-            $params['q'] = '%' . $q . '%';
+            $where[] = '(s.'.BabelSchema::STR_CODE.' LIKE :q OR s.'.BabelSchema::STR_SOURCE.' LIKE :q OR s.'.BabelSchema::STR_CONTEXT.' LIKE :q)';
+            $params['q'] = '%'.$q.'%';
         }
 
-        $sql = 'SELECT s.' . BabelSchema::STR_CODE . ' AS code,
-                       s.' . BabelSchema::STR_SOURCE_LOCALE . ' AS source_locale,
-                       s.' . BabelSchema::STR_CONTEXT . ' AS context,
-                       s.' . BabelSchema::STR_SOURCE . ' AS source';
+        $sql = 'SELECT s.'.BabelSchema::STR_CODE.' AS code,
+                       s.'.BabelSchema::STR_SOURCE_LOCALE.' AS source_locale,
+                       s.'.BabelSchema::STR_CONTEXT.' AS context,
+                       s.'.BabelSchema::STR_SOURCE.' AS source';
 
         if ($trLocale) {
-            $sql .= ', tr.' . BabelSchema::STR_TR_TEXT . ' AS tr_text';
+            $sql .= ', tr.'.BabelSchema::STR_TR_TEXT.' AS tr_text';
         }
 
-        $sql .= ' FROM ' . BabelSchema::STR_TABLE . ' s';
+        $sql .= ' FROM '.BabelSchema::STR_TABLE.' s';
 
         if ($trLocale) {
-            $sql .= ' LEFT JOIN ' . BabelSchema::STR_TR_TABLE . ' tr
-                      ON tr.' . BabelSchema::STR_TR_STR_CODE . ' = s.' . BabelSchema::STR_CODE . '
-                     AND tr.' . BabelSchema::STR_TR_TARGET_LOCALE . ' = :tl
-                     AND tr.' . BabelSchema::STR_TR_ENGINE . ' = :eng';
+            $sql .= ' LEFT JOIN '.BabelSchema::STR_TR_TABLE.' tr
+                      ON tr.'.BabelSchema::STR_TR_STR_CODE.' = s.'.BabelSchema::STR_CODE.'
+                     AND tr.'.BabelSchema::STR_TR_TARGET_LOCALE.' = :tl
+                     AND tr.'.BabelSchema::STR_TR_ENGINE.' = :eng';
             $params['tl'] = $trLocale;
             $params['eng'] = $engine;
         }
 
         if ($where) {
-            $sql .= ' WHERE ' . implode(' AND ', $where);
+            $sql .= ' WHERE '.implode(' AND ', $where);
         }
 
-        $sql .= ' ORDER BY s.' . BabelSchema::STR_CODE . ' ASC';
-        $sql .= ' LIMIT ' . (int) $limit;
+        $sql .= ' ORDER BY s.'.BabelSchema::STR_CODE.' ASC';
+        $sql .= ' LIMIT '.(int) $limit;
 
         $rows = $this->db->fetchAllAssociative($sql, $params);
 
         if (!$rows) {
             $io->warning('No rows matched.');
+
             return Command::SUCCESS;
         }
 
         $headers = array_keys($rows[0]);
-        $io->table($headers, array_map(fn(array $r) => array_values($r), $rows));
+        $io->table($headers, array_map(fn (array $r) => array_values($r), $rows));
 
         $io->note(sprintf(
             'Tip: term labels use contexts like "term:set:code:label" or "term_set:set:label" depending on your registry.',

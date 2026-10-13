@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -28,8 +29,8 @@ final class LocaleContext implements ResetInterface
     private ?string $current = null; // lazy-resolved; display/effective locale
 
     /**
-     * @param string   $default  e.g. 'en'
-     * @param string[] $enabled  allowed locales, may be []
+     * @param string   $default e.g. 'en'
+     * @param string[] $enabled allowed locales, may be []
      */
     public function __construct(
         private readonly ?LocaleAwareInterface $translator = null,
@@ -39,7 +40,8 @@ final class LocaleContext implements ResetInterface
         #[Autowire(param: 'kernel.enabled_locales')] private readonly array $enabled = [],
         private readonly ?LoggerInterface $logger = null,
         #[Autowire(param: 'kernel.debug')] private readonly bool $debug = false,
-    ) {}
+    ) {
+    }
 
     /**
      * Current/effective (display) locale.
@@ -52,7 +54,7 @@ final class LocaleContext implements ResetInterface
      */
     public function get(): string
     {
-        if ($this->current !== null) {
+        if (null !== $this->current) {
             return $this->current;
         }
 
@@ -62,11 +64,11 @@ final class LocaleContext implements ResetInterface
         // If enabled_locales is configured, enforce membership.
         // (If enabled list is empty, accept any normalized locale.)
         $enabled = $this->getEnabled();
-        if ($enabled !== [] && !\in_array($resolved, $enabled, true)) {
+        if ([] !== $enabled && !\in_array($resolved, $enabled, true)) {
             $this->debugLog('LocaleContext.get: resolved locale not enabled; falling back to default', [
                 'resolved' => $resolved,
-                'default'  => $this->getDefault(),
-                'enabled'  => $enabled,
+                'default' => $this->getDefault(),
+                'enabled' => $enabled,
             ]);
             $resolved = $this->getDefault();
         }
@@ -75,7 +77,7 @@ final class LocaleContext implements ResetInterface
 
         $this->debugLog('LocaleContext.get: resolved', [
             'current' => $this->current,
-            'mode'    => $this->requests?->getCurrentRequest() ? 'http' : 'cli',
+            'mode' => $this->requests?->getCurrentRequest() ? 'http' : 'cli',
         ]);
 
         return $this->current;
@@ -85,7 +87,6 @@ final class LocaleContext implements ResetInterface
     {
         $this->current = null;
     }
-
 
     /**
      * Force/override for this run (CLI, explicit app rule).
@@ -126,8 +127,9 @@ final class LocaleContext implements ResetInterface
     {
         // normalize + unique, preserving stable ordering as best as possible
         $list = array_map(self::norm(...), $this->enabled);
-        $list = array_values(array_filter($list, static fn(string $l) => $l !== ''));
+        $list = array_values(array_filter($list, static fn (string $l) => '' !== $l));
         $list = array_values(array_unique($list));
+
         return $list;
     }
 
@@ -148,8 +150,8 @@ final class LocaleContext implements ResetInterface
         }
 
         $this->debugLog('LocaleContext.apply', [
-            'locale'  => $locale,
-            'reason'  => $reason,
+            'locale' => $locale,
+            'reason' => $reason,
             'enabled' => $this->getEnabled(),
         ]);
     }
@@ -157,12 +159,8 @@ final class LocaleContext implements ResetInterface
     private function assertAllowed(string $locale): void
     {
         $enabled = $this->getEnabled();
-        if ($enabled !== [] && !\in_array($locale, $enabled, true)) {
-            throw new \InvalidArgumentException(sprintf(
-                'Unsupported locale "%s". Allowed: %s',
-                $locale,
-                implode(', ', $enabled)
-            ));
+        if ([] !== $enabled && !\in_array($locale, $enabled, true)) {
+            throw new \InvalidArgumentException(sprintf('Unsupported locale "%s". Allowed: %s', $locale, implode(', ', $enabled)));
         }
     }
 
@@ -216,26 +214,27 @@ final class LocaleContext implements ResetInterface
 
         foreach ($candidates as $candRaw) {
             $cand = self::norm((string) $candRaw);
-            if ($cand === '') {
+            if ('' === $cand) {
                 continue;
             }
-            if ($enabled === [] || \in_array($cand, $enabled, true)) {
+            if ([] === $enabled || \in_array($cand, $enabled, true)) {
                 $this->debugLog('LocaleContext.resolveFromRequest: selected', [
                     'selected' => $cand,
-                    'enabled'  => $enabled,
-                    'uri'      => $r->getRequestUri(),
-                    'route'    => $r->attributes->get('_route'),
-                    'method'   => $r->getMethod(),
+                    'enabled' => $enabled,
+                    'uri' => $r->getRequestUri(),
+                    'route' => $r->attributes->get('_route'),
+                    'method' => $r->getMethod(),
                 ]);
+
                 return $cand;
             }
         }
 
         $this->debugLog('LocaleContext.resolveFromRequest: no candidate matched enabled locales', [
-            'candidates' => array_map(static fn($v) => self::norm((string) $v), $candidates),
-            'enabled'    => $enabled,
-            'uri'        => $r->getRequestUri(),
-            'route'      => $r->attributes->get('_route'),
+            'candidates' => array_map(static fn ($v) => self::norm((string) $v), $candidates),
+            'enabled' => $enabled,
+            'uri' => $r->getRequestUri(),
+            'route' => $r->attributes->get('_route'),
         ]);
 
         return null;
@@ -247,10 +246,10 @@ final class LocaleContext implements ResetInterface
 
         foreach ($r->getLanguages() as $lang) {
             $lang = self::norm((string) $lang);
-            if ($lang === '') {
+            if ('' === $lang) {
                 continue;
             }
-            if ($enabled === [] || \in_array($lang, $enabled, true)) {
+            if ([] === $enabled || \in_array($lang, $enabled, true)) {
                 return $lang;
             }
         }
@@ -273,8 +272,9 @@ final class LocaleContext implements ResetInterface
         // normalize common "xx" or "xx-YY" forms
         if (\preg_match('/^([a-zA-Z]{2,3})(?:-([A-Za-z]{2}))?$/', $locale, $m)) {
             $lang = \strtolower($m[1]);
-            $reg  = isset($m[2]) ? '-' . \strtoupper($m[2]) : '';
-            return $lang . $reg;
+            $reg = isset($m[2]) ? '-'.\strtoupper($m[2]) : '';
+
+            return $lang.$reg;
         }
 
         return $locale;

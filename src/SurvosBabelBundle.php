@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle;
@@ -7,7 +8,6 @@ use Doctrine\ORM\Events;
 use Survos\BabelBundle\DataCollector\BabelDataCollector;
 use Survos\BabelBundle\Debug\BabelDebugRecorderInterface;
 use Survos\BabelBundle\Debug\NullBabelDebugRecorder;
-use Survos\BabelBundle\Debug\RequestBabelDebugRecorder;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelCarrierScanPass;
 use Survos\BabelBundle\DependencyInjection\Compiler\BabelTraitAwareScanPass;
 use Survos\BabelBundle\EventListener\BabelPostLoadHydrator;
@@ -51,7 +51,7 @@ final class SurvosBabelBundle extends AbstractBundle
             ]);
         }
 
-// Always: provide a safe default recorder
+        // Always: provide a safe default recorder
         $builder->register(NullBabelDebugRecorder::class)
             ->setAutowired(true)
             ->setAutoconfigured(true);
@@ -95,7 +95,7 @@ final class SurvosBabelBundle extends AbstractBundle
 
         // Bridges babel storage (Str/StrTranslation) into Symfony's live translator catalogue.
         // Resource files named "<domain>.<locale>.babel" trigger this loader for that domain/locale.
-        $builder->register(\Survos\BabelBundle\Translation\BabelTranslationLoader::class)
+        $builder->register(Translation\BabelTranslationLoader::class)
             ->setAutowired(true)
             ->setAutoconfigured(true)
             ->addTag('translation.loader', ['alias' => 'babel']);

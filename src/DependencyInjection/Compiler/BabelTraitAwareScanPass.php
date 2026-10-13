@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\DependencyInjection\Compiler;
@@ -6,11 +7,11 @@ namespace Survos\BabelBundle\DependencyInjection\Compiler;
 use Survos\BabelBundle\Attribute\BabelLocale;
 use Survos\BabelBundle\Attribute\BabelStorage;
 use Survos\BabelBundle\Attribute\BabelTerm;
+use Survos\BabelBundle\Contract\BabelHooksInterface;
+use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 use Survos\Lingua\Contracts\Attribute\Translatable;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
-use Survos\BabelBundle\Contract\BabelHooksInterface;
-use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
 
 /**
  * Scans configured source roots for classes using #[BabelStorage(Property)]
@@ -41,7 +42,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
         if (!$rootsParam) {
             $rootsParam = [
-                (string) $container->getParameter('kernel.project_dir') . '/src' => 'App',
+                (string) $container->getParameter('kernel.project_dir').'/src' => 'App',
             ];
         }
 
@@ -93,7 +94,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
 
         /** @var \SplFileInfo $f */
         foreach ($it as $f) {
-            if ($f->isFile() && $f->getExtension() === 'php') {
+            if ($f->isFile() && 'php' === $f->getExtension()) {
                 yield $f->getPathname();
             }
         }
@@ -106,7 +107,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             return null;
         }
 
-        return $prefix . '\\' . \str_replace('/', '\\', \substr($rel, 0, -4));
+        return $prefix.'\\'.\str_replace('/', '\\', \substr($rel, 0, -4));
     }
 
     /**
@@ -155,24 +156,11 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         }
 
         if (!$rc->implementsInterface(BabelHooksInterface::class)) {
-            throw new \LogicException(sprintf(
-                'Class %s has #[%s] but does not implement %s. Add "implements %s" (and typically "use %s").',
-                $fqcn,
-                BabelStorage::class,
-                BabelHooksInterface::class,
-                BabelHooksInterface::class,
-                BabelHooksTrait::class
-            ));
+            throw new \LogicException(sprintf('Class %s has #[%s] but does not implement %s. Add "implements %s" (and typically "use %s").', $fqcn, BabelStorage::class, BabelHooksInterface::class, BabelHooksInterface::class, BabelHooksTrait::class));
         }
 
         if (!$this->classUsesTraitRecursive($rc, BabelHooksTrait::class)) {
-            throw new \LogicException(sprintf(
-                'Class %s implements %s but does not use %s. Add "use %s" to the entity.',
-                $fqcn,
-                BabelHooksInterface::class,
-                BabelHooksTrait::class,
-                BabelHooksTrait::class
-            ));
+            throw new \LogicException(sprintf('Class %s implements %s but does not use %s. Add "use %s" to the entity.', $fqcn, BabelHooksInterface::class, BabelHooksTrait::class, BabelHooksTrait::class));
         }
 
         $props = $this->collectPropsRecursive($rc);
@@ -180,7 +168,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         // 1) Translatable string fields
         $fields = [];
         foreach ($props as $entry) {
-            $p     = $entry['prop'];
+            $p = $entry['prop'];
             $attrs = $p->getAttributes(Translatable::class);
             if (!$attrs) {
                 continue;
@@ -194,7 +182,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
         // 1b) Term fields
         $terms = [];
         foreach ($props as $entry) {
-            $p     = $entry['prop'];
+            $p = $entry['prop'];
             $attrs = $p->getAttributes(BabelTerm::class);
             if (!$attrs) {
                 continue;
@@ -202,28 +190,28 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             /** @var BabelTerm $meta */
             $meta = $attrs[0]->newInstance();
             $terms[$p->getName()] = [
-                'set'      => $meta->set,
+                'set' => $meta->set,
                 'multiple' => $meta->multiple,
-                'context'  => $meta->context,
+                'context' => $meta->context,
             ];
         }
 
         // 2) Locale config
         $localeAccessor = null;
-        $sourceLocale   = null;
-        $targetLocales  = null;
+        $sourceLocale = null;
+        $targetLocales = null;
 
         $classAttrs = $rc->getAttributes(BabelLocale::class);
-        if ($classAttrs !== []) {
+        if ([] !== $classAttrs) {
             /** @var BabelLocale $meta */
-            $meta          = $classAttrs[0]->newInstance();
-            $sourceLocale  = $meta->locale ?: null;
+            $meta = $classAttrs[0]->newInstance();
+            $sourceLocale = $meta->locale ?: null;
             $targetLocales = $meta->targetLocales;
         }
 
-        if ($localeAccessor === null) {
+        if (null === $localeAccessor) {
             foreach ($props as $entry) {
-                $p     = $entry['prop'];
+                $p = $entry['prop'];
                 $attrs = $p->getAttributes(BabelLocale::class);
                 if (!$attrs) {
                     continue;
@@ -233,15 +221,15 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
                 $meta = $attrs[0]->newInstance();
 
                 $localeAccessor = [
-                    'type'   => 'prop',
-                    'name'   => $p->getName(),
+                    'type' => 'prop',
+                    'name' => $p->getName(),
                     'format' => $meta->format ?? null,
                 ];
 
                 if ($meta->locale) {
                     $sourceLocale = $meta->locale;
                 }
-                if ($meta->targetLocales !== null) {
+                if (null !== $meta->targetLocales) {
                     $targetLocales = $meta->targetLocales;
                 }
 
@@ -249,7 +237,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             }
         }
 
-        if ($localeAccessor === null) {
+        if (null === $localeAccessor) {
             foreach ($rc->getMethods() as $m) {
                 $attrs = $m->getAttributes(BabelLocale::class);
                 if (!$attrs) {
@@ -260,15 +248,15 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
                 $meta = $attrs[0]->newInstance();
 
                 $localeAccessor = [
-                    'type'   => 'method',
-                    'name'   => $m->getName(),
+                    'type' => 'method',
+                    'name' => $m->getName(),
                     'format' => $meta->format ?? null,
                 ];
 
                 if ($meta->locale) {
                     $sourceLocale = $meta->locale;
                 }
-                if ($meta->targetLocales !== null) {
+                if (null !== $meta->targetLocales) {
                     $targetLocales = $meta->targetLocales;
                 }
 
@@ -276,12 +264,12 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             }
         }
 
-        if ($localeAccessor === null) {
+        if (null === $localeAccessor) {
             foreach (['srcLocale', 'sourceLocale'] as $n) {
                 if ($rc->hasProperty($n)) {
                     $localeAccessor = [
-                        'type'   => 'prop',
-                        'name'   => $n,
+                        'type' => 'prop',
+                        'name' => $n,
                         'format' => null,
                     ];
                     break;
@@ -289,17 +277,17 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             }
         }
 
-        if ($fields === [] && $terms === [] && $localeAccessor === null && $sourceLocale === null && $targetLocales === null) {
+        if ([] === $fields && [] === $terms && null === $localeAccessor && null === $sourceLocale && null === $targetLocales) {
             return;
         }
 
         $index[$fqcn] = [
-            'fields'         => $fields,
-            'terms'          => $terms,
+            'fields' => $fields,
+            'terms' => $terms,
             'localeAccessor' => $localeAccessor,
-            'sourceLocale'   => $sourceLocale,
-            'targetLocales'  => $targetLocales,
-            'hasTCodes'      => false,
+            'sourceLocale' => $sourceLocale,
+            'targetLocales' => $targetLocales,
+            'hasTCodes' => false,
         ];
     }
 
@@ -331,12 +319,12 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
      */
     private function collectTraitsRecursive(\ReflectionClass $rc): array
     {
-        $seen  = [];
-        $out   = [];
+        $seen = [];
+        $out = [];
         $stack = $rc->getTraits();
 
         while ($stack) {
-            $t    = \array_pop($stack);
+            $t = \array_pop($stack);
             $name = $t->getName();
 
             if (isset($seen[$name])) {
@@ -344,7 +332,7 @@ final class BabelTraitAwareScanPass implements CompilerPassInterface
             }
 
             $seen[$name] = true;
-            $out[]       = $t;
+            $out[] = $t;
 
             foreach ($t->getTraits() as $tt) {
                 $stack[] = $tt;

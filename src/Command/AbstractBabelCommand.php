@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -11,7 +12,7 @@ use Symfony\Component\Console\Input\InputOption;
 abstract class AbstractBabelCommand extends Command
 {
     public function __construct(
-        private readonly LocaleContext $localeContext
+        private readonly LocaleContext $localeContext,
     ) {
         parent::__construct();
     }
@@ -32,7 +33,7 @@ abstract class AbstractBabelCommand extends Command
     {
         /** @var ?string $override */
         $override = $input->getOption('src-locale');
-        if (\is_string($override) && $override !== '') {
+        if (\is_string($override) && '' !== $override) {
             $this->localeContext->set($override);
         }
     }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -17,8 +18,9 @@ final class CarrierRegistry
         /** @var list<string> */
         private array $scanEntityManagers = ['default'],
         /** @var list<string> */
-        private array $allowedNamespaces = ['App\\Entity','Survos\\PixieBundle\\Entity'],
-    ) {}
+        private array $allowedNamespaces = ['App\\Entity', 'Survos\\PixieBundle\\Entity'],
+    ) {
+    }
 
     /**
      * @return array{code:list<class-string>, property:list<class-string>}
@@ -43,7 +45,7 @@ final class CarrierRegistry
                 }
 
                 $mode = $attrs[0]->newInstance()->mode;
-                if ($mode === StorageMode::Code) {
+                if (StorageMode::Code === $mode) {
                     $code[] = $class;
                 } else {
                     $prop[] = $class;
@@ -63,10 +65,11 @@ final class CarrierRegistry
     private function isAllowed(string $fqcn): bool
     {
         foreach ($this->allowedNamespaces as $ns) {
-            if (str_starts_with($fqcn, rtrim($ns,'\\').'\\')) {
+            if (str_starts_with($fqcn, rtrim($ns, '\\').'\\')) {
                 return true;
             }
         }
+
         return false;
     }
 }

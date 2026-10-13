@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -15,7 +16,8 @@ final class BabelStatsCommand
 {
     public function __construct(
         private readonly Connection $connection,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -29,7 +31,7 @@ final class BabelStatsCommand
         $io->title('Babel translation stats');
 
         $strTable = BabelSchema::STR_TABLE;
-        $trTable  = BabelSchema::STR_TR_TABLE;
+        $trTable = BabelSchema::STR_TR_TABLE;
 
         $totalStr = (int) $this->connection->fetchOne("SELECT COUNT(*) FROM {$strTable}");
         $io->writeln(sprintf('STR rows (%s): <info>%d</info>', $strTable, $totalStr));
@@ -37,12 +39,12 @@ final class BabelStatsCommand
         $params = [];
         $where = [];
 
-        if ($locale !== null) {
+        if (null !== $locale) {
             $where[] = BabelSchema::STR_TR_TARGET_LOCALE.' = :locale';
             $params['locale'] = $locale;
         }
 
-        $engineFilterEnabled = $engine !== '(all)';
+        $engineFilterEnabled = '(all)' !== $engine;
         if ($engineFilterEnabled) {
             $where[] = BabelSchema::STR_TR_ENGINE.' = :engine';
             $params['engine'] = $engine;
@@ -63,20 +65,21 @@ final class BabelStatsCommand
         // Per-locale coverage for selected engine
         $io->section('Per-locale coverage');
 
-        $sql = "
+        $sql = '
             SELECT
-                ".BabelSchema::STR_TR_TARGET_LOCALE." AS locale,
+                '.BabelSchema::STR_TR_TARGET_LOCALE.' AS locale,
                 COUNT(*) AS total,
-                SUM(CASE WHEN ".BabelSchema::STR_TR_TEXT." IS NOT NULL AND ".BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
+                SUM(CASE WHEN '.BabelSchema::STR_TR_TEXT.' IS NOT NULL AND '.BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
             FROM {$trTable}
             {$whereSql}
-            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE."
-            ORDER BY ".BabelSchema::STR_TR_TARGET_LOCALE."
-        ";
+            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE.'
+            ORDER BY '.BabelSchema::STR_TR_TARGET_LOCALE.'
+        ';
 
         $rows = $this->connection->fetchAllAssociative($sql, $params);
-        if ($rows === []) {
+        if ([] === $rows) {
             $io->warning('No STR_TR rows match the current filters.');
+
             return Command::SUCCESS;
         }
 
@@ -87,10 +90,10 @@ final class BabelStatsCommand
 
         $tableRows = [];
         foreach ($rows as $r) {
-            $loc        = (string) $r['locale'];
-            $total      = (int) $r['total'];
+            $loc = (string) $r['locale'];
+            $total = (int) $r['total'];
             $translated = (int) $r['translated'];
-            $missing    = max(0, $total - $translated);
+            $missing = max(0, $total - $translated);
 
             $coverage = ($totalStr > 0) ? (100.0 * $translated / $totalStr) : 0.0;
 
@@ -117,31 +120,32 @@ final class BabelStatsCommand
 
         $params2 = [];
         $where2 = [];
-        if ($locale !== null) {
+        if (null !== $locale) {
             $where2[] = BabelSchema::STR_TR_TARGET_LOCALE.' = :locale';
             $params2['locale'] = $locale;
         }
         $whereSql2 = $where2 ? ('WHERE '.implode(' AND ', $where2)) : '';
 
-        $sql2 = "
+        $sql2 = '
             SELECT
-                ".BabelSchema::STR_TR_TARGET_LOCALE." AS locale,
-                COALESCE(".BabelSchema::STR_TR_ENGINE.", '(null)') AS engine,
+                '.BabelSchema::STR_TR_TARGET_LOCALE.' AS locale,
+                COALESCE('.BabelSchema::STR_TR_ENGINE.", '(null)') AS engine,
                 COUNT(*) AS total,
-                SUM(CASE WHEN ".BabelSchema::STR_TR_TEXT." IS NOT NULL AND ".BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
+                SUM(CASE WHEN ".BabelSchema::STR_TR_TEXT.' IS NOT NULL AND '.BabelSchema::STR_TR_TEXT." <> '' THEN 1 ELSE 0 END) AS translated
             FROM {$trTable}
             {$whereSql2}
-            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE.", ".BabelSchema::STR_TR_ENGINE."
-            ORDER BY ".BabelSchema::STR_TR_TARGET_LOCALE.", engine
-        ";
+            GROUP BY ".BabelSchema::STR_TR_TARGET_LOCALE.', '.BabelSchema::STR_TR_ENGINE.'
+            ORDER BY '.BabelSchema::STR_TR_TARGET_LOCALE.', engine
+        ';
 
         $rows2 = $this->connection->fetchAllAssociative($sql2, $params2);
         if ($rows2) {
             $io->table(
                 ['Locale', 'Engine', 'Rows', 'With text', 'Missing'],
-                array_map(static function(array $r): array {
+                array_map(static function (array $r): array {
                     $total = (int) $r['total'];
                     $translated = (int) $r['translated'];
+
                     return [
                         (string) $r['locale'],
                         (string) $r['engine'],
@@ -160,7 +164,8 @@ final class BabelStatsCommand
     {
         $pct = max(0.0, min(100.0, $pct));
         $filled = (int) round($pct / 100 * $width);
-        $empty  = $width - $filled;
-        return '[' . str_repeat('#', $filled) . str_repeat('.', $empty) . ']';
+        $empty = $width - $filled;
+
+        return '['.str_repeat('#', $filled).str_repeat('.', $empty).']';
     }
 }

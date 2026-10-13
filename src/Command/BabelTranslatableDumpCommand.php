@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -10,7 +11,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand('babel:translatable:dump', 'Dump the cached translatable index map (debug)')]
 final class BabelTranslatableDumpCommand
 {
-    public function __construct(private readonly TranslatableIndex $index) {}
+    public function __construct(private readonly TranslatableIndex $index)
+    {
+    }
 
     public function __invoke(SymfonyStyle $io): int
     {
@@ -18,6 +21,7 @@ final class BabelTranslatableDumpCommand
         $map = $this->index->all();
         if (!$map) {
             $io->warning('Index map is empty.');
+
             return 0;
         }
 

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -15,13 +16,15 @@ final class BabelScanCommand
     public function __construct(
         private readonly TranslatableScanner $scanner,
         private readonly TranslatableMapProvider $provider,
-    ) {}
+    ) {
+    }
 
     public function __invoke(SymfonyStyle $io): int
     {
         $map = $this->scanner->buildMap();
         if (!$map) {
             $io->warning('No translatable fields found. Did you add #[BabelStorage(Property)] and #[Translatable] attributes?');
+
             return Command::SUCCESS;
         }
 

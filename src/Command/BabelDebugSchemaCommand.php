@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -11,7 +12,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand('babel:debug:schema', 'Show Doctrine table/column mapping for Str / StrTranslation (by table name)')]
 final class BabelDebugSchemaCommand
 {
-    public function __construct(private readonly EntityManagerInterface $em) {}
+    public function __construct(private readonly EntityManagerInterface $em)
+    {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -27,13 +30,13 @@ final class BabelDebugSchemaCommand
         }
 
         $targets = [
-            ['name'=>'Str', 'table'=>$strTable],
-            ['name'=>'StrTranslation', 'table'=>$trTable],
+            ['name' => 'Str', 'table' => $strTable],
+            ['name' => 'StrTranslation', 'table' => $trTable],
         ];
 
         foreach ($targets as $t) {
-//            $count = $this->em->getR
-            $name  = $t['name'];
+            //            $count = $this->em->getR
+            $name = $t['name'];
             $table = $t['table'];
 
             $io->section(sprintf('%s table: %s', $name, $table));
@@ -44,7 +47,7 @@ final class BabelDebugSchemaCommand
                 continue;
             }
             if (\count($metas) > 1) {
-                $io->warning(sprintf('Multiple entities map table "%s": %s', $table, implode(', ', array_map(fn($m)=>$m->getName(), $metas))));
+                $io->warning(sprintf('Multiple entities map table "%s": %s', $table, implode(', ', array_map(fn ($m) => $m->getName(), $metas))));
             }
 
             $m = $metas[0];
@@ -59,27 +62,28 @@ final class BabelDebugSchemaCommand
                 $rows[] = [
                     $field,
                     $m->getColumnName($field),
-                    (string)($map['type'] ?? 'unknown'),
+                    (string) ($map['type'] ?? 'unknown'),
                     ($map['nullable'] ?? false) ? 'YES' : 'NO',
-                    (string)($map['length'] ?? ''),
+                    (string) ($map['length'] ?? ''),
                     isset($map['options']) ? json_encode($map['options'], JSON_UNESCAPED_SLASHES) : '',
                 ];
             }
-            $io->table(['Field','Column','Type','Nullable','Length','Options'], $rows);
+            $io->table(['Field', 'Column', 'Type', 'Nullable', 'Length', 'Options'], $rows);
 
             if ($io->isVerbose()) {
                 $io->writeln('<info>Raw:</info>');
                 $io->writeln(print_r([
-                    'entity'  => $m->getName(),
-                    'table'   => $m->getTableName(),
-                    'fields'  => array_map(fn($f)=>$m->getFieldMapping($f), $m->getFieldNames()),
-                    'id'      => $m->getIdentifierFieldNames(),
-                    'assocs'  => $m->getAssociationMappings(),
+                    'entity' => $m->getName(),
+                    'table' => $m->getTableName(),
+                    'fields' => array_map(fn ($f) => $m->getFieldMapping($f), $m->getFieldNames()),
+                    'id' => $m->getIdentifierFieldNames(),
+                    'assocs' => $m->getAssociationMappings(),
                 ], true));
             }
         }
 
         $io->success('Done.');
+
         return 0;
     }
 }

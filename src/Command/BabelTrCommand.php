@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -16,7 +17,8 @@ final class BabelTrCommand
 {
     public function __construct(
         private readonly Connection $db,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -32,41 +34,43 @@ final class BabelTrCommand
         $params = [];
 
         if ($locale) {
-            $where[] = 'tr.' . BabelSchema::STR_TR_TARGET_LOCALE . ' = :loc';
+            $where[] = 'tr.'.BabelSchema::STR_TR_TARGET_LOCALE.' = :loc';
             $params['loc'] = $locale;
         }
         if ($engine) {
-            $where[] = 'tr.' . BabelSchema::STR_TR_ENGINE . ' = :eng';
+            $where[] = 'tr.'.BabelSchema::STR_TR_ENGINE.' = :eng';
             $params['eng'] = $engine;
         }
         if ($missing) {
-            $where[] = '(tr.' . BabelSchema::STR_TR_TEXT . ' IS NULL OR tr.' . BabelSchema::STR_TR_TEXT . " = '')";
+            $where[] = '(tr.'.BabelSchema::STR_TR_TEXT.' IS NULL OR tr.'.BabelSchema::STR_TR_TEXT." = '')";
         }
         if ($q) {
-            $where[] = '(tr.' . BabelSchema::STR_TR_STR_CODE . ' LIKE :q OR tr.' . BabelSchema::STR_TR_TEXT . ' LIKE :q)';
-            $params['q'] = '%' . $q . '%';
+            $where[] = '(tr.'.BabelSchema::STR_TR_STR_CODE.' LIKE :q OR tr.'.BabelSchema::STR_TR_TEXT.' LIKE :q)';
+            $params['q'] = '%'.$q.'%';
         }
 
-        $sql = 'SELECT tr.' . BabelSchema::STR_TR_STR_CODE . ' AS str_code,
-                       tr.' . BabelSchema::STR_TR_TARGET_LOCALE . ' AS target_locale,
-                       tr.' . BabelSchema::STR_TR_ENGINE . ' AS engine,
-                       tr.' . BabelSchema::STR_TR_TEXT . ' AS text
-                FROM ' . BabelSchema::STR_TR_TABLE . ' tr';
+        $sql = 'SELECT tr.'.BabelSchema::STR_TR_STR_CODE.' AS str_code,
+                       tr.'.BabelSchema::STR_TR_TARGET_LOCALE.' AS target_locale,
+                       tr.'.BabelSchema::STR_TR_ENGINE.' AS engine,
+                       tr.'.BabelSchema::STR_TR_TEXT.' AS text
+                FROM '.BabelSchema::STR_TR_TABLE.' tr';
 
         if ($where) {
-            $sql .= ' WHERE ' . implode(' AND ', $where);
+            $sql .= ' WHERE '.implode(' AND ', $where);
         }
 
-        $sql .= ' ORDER BY tr.' . BabelSchema::STR_TR_STR_CODE . ' ASC';
-        $sql .= ' LIMIT ' . (int) $limit;
+        $sql .= ' ORDER BY tr.'.BabelSchema::STR_TR_STR_CODE.' ASC';
+        $sql .= ' LIMIT '.(int) $limit;
 
         $rows = $this->db->fetchAllAssociative($sql, $params);
         if (!$rows) {
             $io->warning('No rows matched.');
+
             return Command::SUCCESS;
         }
 
-        $io->table(array_keys($rows[0]), array_map(fn(array $r) => array_values($r), $rows));
+        $io->table(array_keys($rows[0]), array_map(fn (array $r) => array_values($r), $rows));
+
         return Command::SUCCESS;
     }
 }

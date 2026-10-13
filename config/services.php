@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Symfony\Component\DependencyInjection\Loader\Configurator;
@@ -25,7 +26,6 @@ use Survos\BabelBundle\Service\StringResolver;
 use Survos\BabelBundle\Service\StringStorageRouter;
 use Survos\BabelBundle\Service\TranslatableIndex;
 use Survos\BabelBundle\Service\TranslatableMapProvider;
-use Survos\LibreTranslateBundle\Service\TranslationClientService;
 
 return static function (ContainerConfigurator $c): void {
     $s = $c->services();
@@ -33,20 +33,19 @@ return static function (ContainerConfigurator $c): void {
     $s->defaults()->autowire(true)->autoconfigure(true)->public(false);
 
     // Load ONCE; avoid reloading which can overwrite explicit args with plain autowiring
-    $s->load('Survos\\BabelBundle\\', \dirname(__DIR__) . '/src/')
+    $s->load('Survos\\BabelBundle\\', \dirname(__DIR__).'/src/')
         ->exclude([
-            \dirname(__DIR__) . '/src/Entity/',
-            \dirname(__DIR__) . '/src/Traits/',
-            \dirname(__DIR__) . '/src/Resources/',
-            \dirname(__DIR__) . '/src/Tests/',
-            \dirname(__DIR__) . '/src/Event/',
-            \dirname(__DIR__) . '/src/Kernel.php',
-//            __DIR__ . '/../src/DependencyInjection/',
+            \dirname(__DIR__).'/src/Entity/',
+            \dirname(__DIR__).'/src/Traits/',
+            \dirname(__DIR__).'/src/Resources/',
+            \dirname(__DIR__).'/src/Tests/',
+            \dirname(__DIR__).'/src/Event/',
+            \dirname(__DIR__).'/src/Kernel.php',
+            //            __DIR__ . '/../src/DependencyInjection/',
         ]);
 
-    $s->load('Survos\\BabelBundle\\EventListener\\', __DIR__ . '/../src/EventListener/');
-    $s->load('Survos\\BabelBundle\\EventSubscriber\\', __DIR__ . '/../src/EventSubscriber/'); // if any
-
+    $s->load('Survos\\BabelBundle\\EventListener\\', __DIR__.'/../src/EventListener/');
+    $s->load('Survos\\BabelBundle\\EventSubscriber\\', __DIR__.'/../src/EventSubscriber/'); // if any
 
     // Engines
     $s->set(CodeStorage::class)
@@ -61,17 +60,16 @@ return static function (ContainerConfigurator $c): void {
         ->arg('$requests', service('request_stack'))
     ;
 
-
     // Router: EXPLICIT constructor args so we never rely on interface autowiring
-//    $s->set(StringStorageRouter::class)
-//        ->arg('$code', service(CodeStorage::class))
-//        ->arg('$property', service(PropertyStorage::class))
-//        ->public();
-//
-//    // Other services
-//    $s->set(StringResolver::class)
-//        ->arg('$registry', service('doctrine'))
-//        ->public();
+    //    $s->set(StringStorageRouter::class)
+    //        ->arg('$code', service(CodeStorage::class))
+    //        ->arg('$property', service(PropertyStorage::class))
+    //        ->public();
+    //
+    //    // Other services
+    //    $s->set(StringResolver::class)
+    //        ->arg('$registry', service('doctrine'))
+    //        ->public();
 
     $s->set(CarrierRegistry::class)
         ->arg('$doctrine', service('doctrine'))
@@ -86,13 +84,12 @@ return static function (ContainerConfigurator $c): void {
     // Commands
 
     foreach ([BabelBrowseCommand::class,
-                 BabelDebugSchemaCommand::class,
-                 BabelTranslatableDumpCommand::class] as $commandClass) {
+        BabelDebugSchemaCommand::class,
+        BabelTranslatableDumpCommand::class] as $commandClass) {
         $s->set($commandClass)
             ->public()
             ->autoconfigure(true)
             ->tag('console.command');
-
     }
     $s->set(TranslationsEnsureCommand::class)
         ->autoconfigure()

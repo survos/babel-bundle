@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -30,7 +31,8 @@ final class TermRegistry implements ResetInterface
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly LocaleContext $localeContext,
-    ) {}
+    ) {
+    }
 
     public function ensureTermSet(string $setCode, ?string $label = null, ?string $description = null): TermSet
     {
@@ -48,10 +50,10 @@ final class TermRegistry implements ResetInterface
             $this->setCache[$setCode] = $set;
         }
 
-        if ($label !== null) {
+        if (null !== $label) {
             $set->labelCode = $this->ensureStrCode($label, context: "term_set:$setCode:label", createStubs: true);
         }
-        if ($description !== null) {
+        if (null !== $description) {
             $set->descriptionCode = $this->ensureStrCode($description, context: "term_set:$setCode:description", createStubs: true);
         }
 
@@ -65,7 +67,7 @@ final class TermRegistry implements ResetInterface
         ?string $description = null,
         ?string $path = null,
     ): Term {
-        $cacheKey = $setCode . '|' . $termCode;
+        $cacheKey = $setCode.'|'.$termCode;
 
         if (isset($this->termCache[$cacheKey])) {
             $term = $this->termCache[$cacheKey];
@@ -92,10 +94,10 @@ final class TermRegistry implements ResetInterface
             $this->termCache[$cacheKey] = $term;
         }
 
-        if ($label !== null) {
+        if (null !== $label) {
             $term->labelCode = $this->ensureStrCode($label, context: "term:$setCode:$termCode:label", createStubs: true);
         }
-        if ($description !== null) {
+        if (null !== $description) {
             $term->descriptionCode = $this->ensureStrCode($description, context: "term:$setCode:$termCode:description", createStubs: true);
         }
 
@@ -113,7 +115,7 @@ final class TermRegistry implements ResetInterface
         $sourceLocale = $this->localeContext->get();
         assert($sourceLocale);
 
-        $cacheKey = $sourceLocale . '|' . ($context ?? '') . '|' . $source;
+        $cacheKey = $sourceLocale.'|'.($context ?? '').'|'.$source;
         if (isset($this->strCache[$cacheKey])) {
             return $this->strCache[$cacheKey];
         }
@@ -126,6 +128,7 @@ final class TermRegistry implements ResetInterface
             if ($createStubs) {
                 $this->ensureTranslationStubs($code, $sourceLocale);
             }
+
             return $this->strCache[$cacheKey] = $code;
         }
 

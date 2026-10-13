@@ -1,11 +1,12 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\App\Entity;
 
-use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Contract\BabelHooksInterface;
 use Survos\BabelBundle\Entity\Traits\BabelHooksTrait;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 
 final class SimpleOwner implements BabelHooksInterface
 {
@@ -30,7 +31,7 @@ final class SimpleOwner implements BabelHooksInterface
         get => $this->resolveTranslatable('description', $this->descriptionBacking);
         set {
             $this->descriptionBacking = $value;
-            if ($value !== null) {
+            if (null !== $value) {
                 $this->setResolvedTranslation('description', $value);
             }
         }

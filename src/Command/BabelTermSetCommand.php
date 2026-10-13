@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -20,7 +21,8 @@ final class BabelTermSetCommand
     public function __construct(
         private readonly Connection $db,
         private readonly LocaleContext $localeContext,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -57,6 +59,7 @@ final class BabelTermSetCommand
 
             if (!$sets) {
                 $io->error('No TermSets found.');
+
                 return Command::INVALID;
             }
 
@@ -64,17 +67,18 @@ final class BabelTermSetCommand
             $io->table(
                 ['Code', 'Terms'],
                 array_map(
-                    fn(array $r) => [(string) $r['set_code'], (string) $r['term_count']],
+                    fn (array $r) => [(string) $r['set_code'], (string) $r['term_count']],
                     $sets
                 )
             );
 
             if (!$input->isInteractive()) {
                 $io->error('Missing <set> argument (non-interactive mode).');
+
                 return Command::INVALID;
             }
 
-            $choices = array_map(fn(array $r) => (string) $r['set_code'], $sets);
+            $choices = array_map(fn (array $r) => (string) $r['set_code'], $sets);
             $set = $io->choice('Which TermSet do you want to browse?', $choices);
         }
 
@@ -90,17 +94,18 @@ final class BabelTermSetCommand
 
         if (!$setId) {
             $io->error(sprintf('Unknown TermSet: %s', $set));
+
             return Command::INVALID;
         }
 
         $io->title(sprintf('TermSet "%s" (locale=%s, engine=%s)', $set, $displayLocale, $engine));
 
-        $where = ['t.' . BabelSchema::TERM_TERM_SET_ID . ' = :sid'];
+        $where = ['t.'.BabelSchema::TERM_TERM_SET_ID.' = :sid'];
         $params = ['sid' => (int) $setId];
 
         if ($startsWith) {
-            $where[] = 't.' . BabelSchema::TERM_CODE . ' LIKE :sw';
-            $params['sw'] = $startsWith . '%';
+            $where[] = 't.'.BabelSchema::TERM_CODE.' LIKE :sw';
+            $params['sw'] = $startsWith.'%';
         }
 
         $sqlTerms = sprintf(
@@ -117,18 +122,19 @@ final class BabelTermSetCommand
         );
 
         if ($limit > 0) {
-            $sqlTerms .= ' LIMIT ' . (int) $limit;
+            $sqlTerms .= ' LIMIT '.(int) $limit;
         }
 
         $terms = $this->db->fetchAllAssociative($sqlTerms, $params);
 
         if (!$terms) {
             $io->warning('No terms found.');
+
             return Command::SUCCESS;
         }
 
         $labelCodes = array_values(array_filter(array_map(
-            fn(array $r) => $r['label_code'] ? (string) $r['label_code'] : null,
+            fn (array $r) => $r['label_code'] ? (string) $r['label_code'] : null,
             $terms
         )));
 
@@ -171,14 +177,14 @@ final class BabelTermSetCommand
 
             if ($labelCode) {
                 $text = $trByCode[$labelCode] ?? null;
-                if ($text !== null && $text !== '') {
+                if (null !== $text && '' !== $text) {
                     $label = $text;
                     $hasTr = true;
                 }
             }
 
             if (!$hasTr) {
-                $missing++;
+                ++$missing;
             }
 
             $rows[] = [$code, $label, $path, $labelCode ?? '', $hasTr ? 'yes' : 'no'];

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -7,10 +8,10 @@ use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Survos\BabelBundle\Attribute\BabelTerm;
-use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TranslatableIndex;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Symfony\Component\Console\Attribute\Argument;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
@@ -26,7 +27,8 @@ final class BabelBrowseCommand
         private readonly Connection $db,
         private readonly LocaleContext $locale,
         private readonly TranslatableIndex $index,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -39,11 +41,13 @@ final class BabelBrowseCommand
         // Friendly guard when users type: babel:browse fr
         if ($entity && \preg_match('/^[a-z]{2}(?:-[A-Z]{2})?$/', $entity) && !$locale) {
             $io->note(sprintf('Did you mean: babel:browse <Entity> --locale=%s ?', $entity));
+
             return Command::INVALID;
         }
 
         if (!$entity) {
             $io->error('Missing entity argument (e.g., Product).');
+
             return Command::INVALID;
         }
 
@@ -52,9 +56,10 @@ final class BabelBrowseCommand
         }
         $displayLocale = $this->locale->get();
 
-        $fqcn = \class_exists($entity) ? $entity : 'App\\Entity\\' . $entity;
+        $fqcn = \class_exists($entity) ? $entity : 'App\\Entity\\'.$entity;
         if (!\class_exists($fqcn)) {
             $io->error(sprintf('Entity class not found: %s', $entity));
+
             return Command::INVALID;
         }
 
@@ -65,7 +70,7 @@ final class BabelBrowseCommand
 
         // String-backed fields (compiler-built index; fallback to common names)
         $fields = $this->index->fieldsFor($fqcn);
-        if ($fields === []) {
+        if ([] === $fields) {
             $fields = ['title', 'name', 'label', 'content', 'description'];
         }
 
@@ -74,7 +79,7 @@ final class BabelBrowseCommand
 
         $rows = [];
         foreach ($items as $i => $obj) {
-            $row = ['#' => (string)($obj->id ?? ($i + 1))];
+            $row = ['#' => (string) ($obj->id ?? ($i + 1))];
 
             $srcLocale = $this->resolveSourceLocaleViaIndex($obj, $fqcn) ?: $this->locale->getDefault();
 
@@ -86,7 +91,7 @@ final class BabelBrowseCommand
 
                 $val = $obj->{$f};
 
-                if (!\is_string($val) || $val === '') {
+                if (!\is_string($val) || '' === $val) {
                     $row[$f] = $val;
                     continue;
                 }
@@ -94,10 +99,10 @@ final class BabelBrowseCommand
                 $context = $this->resolveTranslatableContext($fqcn, $f);
 
                 // Must match the ensureStrCode strategy used during inserts
-                $strCode = hash('xxh3', $srcLocale . '|' . ($context ?? '') . '|' . $val);
+                $strCode = hash('xxh3', $srcLocale.'|'.($context ?? '').'|'.$val);
                 $translated = $this->fetchStrTrText($strCode, $displayLocale, $engine);
 
-                $row[$f] = ($translated !== null && $translated !== '') ? $translated : $val;
+                $row[$f] = (null !== $translated && '' !== $translated) ? $translated : $val;
             }
 
             // Term fields: show translated labels (via term.label_code -> str_tr.text)
@@ -143,6 +148,7 @@ final class BabelBrowseCommand
             $meta = $attrs[0]->newInstance();
             $out[$p->getName()] = ['set' => $meta->set, 'multiple' => $meta->multiple];
         }
+
         return $out;
     }
 
@@ -160,6 +166,7 @@ final class BabelBrowseCommand
             }
             /** @var Translatable $t */
             $t = $attrs[0]->newInstance();
+
             return $t->context;
         } catch (\Throwable) {
             return null;
@@ -172,14 +179,17 @@ final class BabelBrowseCommand
         if (!$acc) {
             return null;
         }
-        if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
+        if ('prop' === $acc['type'] && \property_exists($entity, $acc['name'])) {
             $v = $entity->{$acc['name']} ?? null;
-            return \is_string($v) && $v !== '' ? $v : null;
+
+            return \is_string($v) && '' !== $v ? $v : null;
         }
-        if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
+        if ('method' === $acc['type'] && \method_exists($entity, $acc['name'])) {
             $v = $entity->{$acc['name']}();
-            return \is_string($v) && $v !== '' ? $v : null;
+
+            return \is_string($v) && '' !== $v ? $v : null;
         }
+
         return null;
     }
 
@@ -196,7 +206,7 @@ final class BabelBrowseCommand
 
         $val = $this->db->fetchOne($sql, ['code' => $strCode, 'loc' => $targetLocale, 'eng' => $engine]);
 
-        return $val === false ? null : (string) $val;
+        return false === $val ? null : (string) $val;
     }
 
     private function resolveTermLabels(
@@ -204,7 +214,7 @@ final class BabelBrowseCommand
         bool $multiple,
         mixed $rawValue,
         string $displayLocale,
-        string $engine
+        string $engine,
     ): string {
         $codes = [];
 
@@ -212,18 +222,18 @@ final class BabelBrowseCommand
             if (\is_array($rawValue)) {
                 foreach ($rawValue as $v) {
                     $v = \is_string($v) ? trim($v) : '';
-                    if ($v !== '') {
+                    if ('' !== $v) {
                         $codes[] = $v;
                     }
                 }
             }
         } else {
-            if (\is_string($rawValue) && trim($rawValue) !== '') {
+            if (\is_string($rawValue) && '' !== trim($rawValue)) {
                 $codes[] = trim($rawValue);
             }
         }
 
-        if ($codes === []) {
+        if ([] === $codes) {
             return '';
         }
 
@@ -258,7 +268,7 @@ final class BabelBrowseCommand
             $labelCode = $labelCodeByTerm[$c] ?? null;
             if ($labelCode) {
                 $t = $this->fetchStrTrText($labelCode, $displayLocale, $engine);
-                $labels[] = ($t !== null && $t !== '') ? $t : $c;
+                $labels[] = (null !== $t && '' !== $t) ? $t : $c;
             } else {
                 $labels[] = $c;
             }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service\Scanner;
@@ -23,7 +24,8 @@ final class TranslatableScanner
         private ManagerRegistry $doctrine,
         /** @var list<string> */ private array $scanEntityManagers = ['default'],
         /** @var list<string> */ private array $allowedNamespaces = ['App\\Entity', 'Survos\\PixieBundle\\Entity'],
-    ) {}
+    ) {
+    }
 
     /** @return array<class-string, list<string>> */
     public function buildMap(): array
@@ -34,14 +36,18 @@ final class TranslatableScanner
             $em = $this->doctrine->getManager($emName);
             foreach ($em->getMetadataFactory()->getAllMetadata() as $meta) {
                 $class = $meta->getName();
-                if (!$this->isAllowed($class)) continue;
+                if (!$this->isAllowed($class)) {
+                    continue;
+                }
 
                 $ref = new \ReflectionClass($class);
                 $attrs = $ref->getAttributes(BabelStorage::class);
-                if (!$attrs) continue;
+                if (!$attrs) {
+                    continue;
+                }
 
                 $mode = $attrs[0]->newInstance()->mode;
-                if ($mode !== StorageMode::Property) {
+                if (StorageMode::Property !== $mode) {
                     // We only map translatable fields for property-storage entities here.
                     continue;
                 }
@@ -54,6 +60,7 @@ final class TranslatableScanner
         }
 
         ksort($map);
+
         return $map;
     }
 
@@ -69,7 +76,9 @@ final class TranslatableScanner
                 break;
             }
         }
-        if ($fields) return $fields;
+        if ($fields) {
+            return $fields;
+        }
 
         // 2) Fallback: call getTranslatableFields() if present (trait-style)
         if ($ref->hasMethod('getTranslatableFields')) {
@@ -80,20 +89,25 @@ final class TranslatableScanner
                 if ($obj && \is_array($obj->getTranslatableFields())) {
                     /** @var list<string> $list */
                     $list = $obj->getTranslatableFields();
+
                     return $list;
                 }
             } catch (\Throwable) {
                 // ignore discovery errors
             }
         }
+
         return [];
     }
 
     private function isAllowed(string $fqcn): bool
     {
         foreach ($this->allowedNamespaces as $ns) {
-            if (str_starts_with($fqcn, rtrim($ns, '\\').'\\')) return true;
+            if (str_starts_with($fqcn, rtrim($ns, '\\').'\\')) {
+                return true;
+            }
         }
+
         return false;
     }
 }

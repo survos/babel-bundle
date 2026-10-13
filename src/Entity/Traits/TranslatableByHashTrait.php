@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Entity\Traits;
@@ -18,7 +19,7 @@ use Survos\BabelBundle\Contract\TranslatableByHashInterface;
 trait TranslatableByHashTrait
 {
     /**
-     * Persisted pointers: field => str.hash
+     * Persisted pointers: field => str.hash.
      *
      * @var array<string,string>|null
      */
@@ -36,7 +37,7 @@ trait TranslatableByHashTrait
         $field = trim($field);
         $strHash = trim($strHash);
 
-        if ($field === '' || $strHash === '') {
+        if ('' === $field || '' === $strHash) {
             return;
         }
 
@@ -50,15 +51,15 @@ trait TranslatableByHashTrait
     public function getStrHashMap(): array
     {
         $map = $this->tCodes ?? [];
-        if ($map === []) {
+        if ([] === $map) {
             return [];
         }
 
         $out = [];
         foreach ($map as $field => $hash) {
             $field = trim((string) $field);
-            $hash  = trim((string) $hash);
-            if ($field !== '' && $hash !== '') {
+            $hash = trim((string) $hash);
+            if ('' !== $field && '' !== $hash) {
                 $out[$field] = $hash;
             }
         }

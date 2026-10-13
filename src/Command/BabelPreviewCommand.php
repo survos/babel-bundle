@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -36,12 +37,14 @@ final class BabelPreviewCommand
     ): int {
         if (!$entity) {
             $io->error('Missing entity argument (e.g., Article or App\\Entity\\Article).');
+
             return Command::INVALID;
         }
 
         // Friendly guard when users type: babel:preview fr
         if ($entity && \preg_match('/^[a-z]{2}(?:-[A-Z]{2})?$/', $entity) && !$locale) {
             $io->note(sprintf('Did you mean: babel:preview <Entity> --locale=%s ?', $entity));
+
             return Command::INVALID;
         }
 
@@ -52,6 +55,7 @@ final class BabelPreviewCommand
                 $entity,
                 implode(', ', $this->scanNamespaces ?: ['(none)'])
             ));
+
             return Command::INVALID;
         }
 
@@ -65,6 +69,7 @@ final class BabelPreviewCommand
             $repo = $this->em->getRepository($fqcn);
         } catch (\Throwable $e) {
             $io->error(sprintf('Failed to get repository for "%s": %s', $fqcn, $e->getMessage()));
+
             return Command::FAILURE;
         }
 
@@ -75,18 +80,19 @@ final class BabelPreviewCommand
 
         if (!$items) {
             $io->writeln('(no rows)');
+
             return Command::SUCCESS;
         }
 
         // Decide which fields to show: translatable fields if known, fallback to common ones.
         $fields = $this->index->fieldsFor($fqcn);
-        if ($fields === []) {
+        if ([] === $fields) {
             $fields = ['title', 'name', 'label', 'content', 'description'];
         }
 
         $rows = [];
         foreach ($items as $i => $obj) {
-            $row = ['#' => (string)($obj->id ?? ($i + 1))];
+            $row = ['#' => (string) ($obj->id ?? ($i + 1))];
 
             foreach ($fields as $f) {
                 if (!\property_exists($obj, $f)) {
@@ -127,7 +133,7 @@ final class BabelPreviewCommand
         $short = ltrim($entity, '\\');
         foreach ($this->scanNamespaces as $ns) {
             $ns = rtrim((string) $ns, '\\');
-            if ($ns === '') {
+            if ('' === $ns) {
                 continue;
             }
             $candidate = $ns.'\\'.$short;

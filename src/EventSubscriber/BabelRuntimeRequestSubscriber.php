@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\EventSubscriber;
@@ -14,7 +15,8 @@ final class BabelRuntimeRequestSubscriber implements EventSubscriberInterface
     public function __construct(
         private readonly LocaleContext $localeContext,
         private readonly string $fallbackLocale = 'en',
-    ) {}
+    ) {
+    }
 
     public static function getSubscribedEvents(): array
     {
@@ -23,14 +25,14 @@ final class BabelRuntimeRequestSubscriber implements EventSubscriberInterface
         // priority 64 ran before Symfony's own LocaleListener/LocaleAwareListener (16/15) and any
         // app subscriber sitting between them, so it locked in a stale locale before the real one
         // was ever set). Low priority here means "run last".
-        return [ KernelEvents::REQUEST => ['onKernelRequest', 8] ];
+        return [KernelEvents::REQUEST => ['onKernelRequest', 8]];
     }
 
     public function onKernelRequest(RequestEvent $event): void
     {
         BabelRuntime::init(
-            locale:     $this->localeContext->get(),
-            fallback:   $this->fallbackLocale
+            locale: $this->localeContext->get(),
+            fallback: $this->fallbackLocale
         );
     }
 }

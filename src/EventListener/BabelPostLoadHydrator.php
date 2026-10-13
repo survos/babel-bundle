@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\EventListener;
@@ -22,21 +23,22 @@ final class BabelPostLoadHydrator
         private readonly TranslatableIndex $index,
         private readonly LocaleContext $locale,
         private readonly LoggerInterface $logger,
-    ) {}
+    ) {
+    }
 
     public function postLoad(PostLoadEventArgs $args): void
     {
-        $em     = $args->getObjectManager();
-        $conn   = $em->getConnection();
+        $em = $args->getObjectManager();
+        $conn = $em->getConnection();
         $entity = $args->getObject();
-        $class  = $entity::class;
+        $class = $entity::class;
 
         if (!$entity instanceof BabelHooksInterface) {
             return;
         }
 
         $displayLocale = HashUtil::normalizeLocale($this->locale->get());
-        if ($displayLocale === '') {
+        if ('' === $displayLocale) {
             return;
         }
 
@@ -44,9 +46,9 @@ final class BabelPostLoadHydrator
         // 1) String-backed translatables (#[Translatable])
         // ------------------------------------------------------------------
         $fields = $this->index->fieldsFor($class);
-        if ($fields !== []) {
+        if ([] !== $fields) {
             $srcLocale = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
-            if ($srcLocale === '') {
+            if ('' === $srcLocale) {
                 $srcLocale = $this->locale->getDefault();
             }
 
@@ -54,7 +56,7 @@ final class BabelPostLoadHydrator
             if ($displayLocale === $srcLocale) {
                 foreach ($fields as $field) {
                     $original = $entity->getBackingValue($field);
-                    if (\is_string($original) && $original !== '') {
+                    if (\is_string($original) && '' !== $original) {
                         $entity->setResolvedTranslation($field, $original);
                     }
                 }
@@ -62,7 +64,7 @@ final class BabelPostLoadHydrator
                 $fieldToStrCode = [];
                 foreach ($fields as $field) {
                     $original = $entity->getBackingValue($field);
-                    if (!\is_string($original) || $original === '') {
+                    if (!\is_string($original) || '' === $original) {
                         continue;
                     }
 
@@ -72,7 +74,7 @@ final class BabelPostLoadHydrator
                     $fieldToStrCode[$field] = $strCode;
                 }
 
-                if ($fieldToStrCode !== []) {
+                if ([] !== $fieldToStrCode) {
                     // No engine filter: `engine` records real provenance (libre/deepl/...),
                     // not a "this is the canonical row" marker — the old 'babel' constant
                     // conflated the two. One StrTranslation row per (str_code, target_locale)
@@ -99,14 +101,14 @@ final class BabelPostLoadHydrator
                     foreach ($rows as $r) {
                         $k = (string) ($r['str_code'] ?? '');
                         $t = $r['text'] ?? null;
-                        if ($k !== '') {
+                        if ('' !== $k) {
                             $byStrCode[$k] = \is_string($t) ? $t : null;
                         }
                     }
 
                     foreach ($fieldToStrCode as $field => $strCode) {
                         $text = $byStrCode[$strCode] ?? null;
-                        if (\is_string($text) && $text !== '') {
+                        if (\is_string($text) && '' !== $text) {
                             $entity->setResolvedTranslation($field, $text);
                         }
                     }
@@ -118,23 +120,23 @@ final class BabelPostLoadHydrator
         // 2) Term-backed fields (#[BabelTerm]) -> resolve label_code -> STR_TR
         // ------------------------------------------------------------------
         $terms = $this->index->termsFor($class);
-        if ($terms === []) {
+        if ([] === $terms) {
             return;
         }
 
         // Collect per-field codes, and per-set aggregate
         $fieldCodes = []; // field => list<string codes>
-        $wantBySet  = []; // set => list<string codes>
+        $wantBySet = []; // set => list<string codes>
 
         foreach ($terms as $field => $meta) {
             if (!\property_exists($entity, $field)) {
                 continue;
             }
 
-            $set      = (string) ($meta['set'] ?? '');
+            $set = (string) ($meta['set'] ?? '');
             $multiple = (bool) ($meta['multiple'] ?? false);
 
-            if ($set === '') {
+            if ('' === $set) {
                 continue;
             }
 
@@ -145,18 +147,18 @@ final class BabelPostLoadHydrator
                 if (\is_array($raw)) {
                     foreach ($raw as $v) {
                         $v = \is_string($v) ? trim($v) : '';
-                        if ($v !== '') {
+                        if ('' !== $v) {
                             $codes[] = $v;
                         }
                     }
                 }
             } else {
-                if (\is_string($raw) && trim($raw) !== '') {
+                if (\is_string($raw) && '' !== trim($raw)) {
                     $codes[] = trim($raw);
                 }
             }
 
-            if ($codes === []) {
+            if ([] === $codes) {
                 continue;
             }
 
@@ -167,7 +169,7 @@ final class BabelPostLoadHydrator
             $wantBySet[$set] = array_values(array_unique(array_merge($wantBySet[$set], $codes)));
         }
 
-        if ($wantBySet === []) {
+        if ([] === $wantBySet) {
             return;
         }
 
@@ -200,21 +202,21 @@ final class BabelPostLoadHydrator
             )->fetchAllAssociative();
 
             foreach ($rows as $r) {
-                $setCode   = (string) ($r['set_code'] ?? '');
-                $termCode  = (string) ($r['term_code'] ?? '');
+                $setCode = (string) ($r['set_code'] ?? '');
+                $termCode = (string) ($r['term_code'] ?? '');
                 $labelCode = $r['label_code'] ?? null;
 
-                if ($setCode === '' || $termCode === '' || !\is_string($labelCode) || $labelCode === '') {
+                if ('' === $setCode || '' === $termCode || !\is_string($labelCode) || '' === $labelCode) {
                     continue;
                 }
 
-                $k = $setCode . '|' . $termCode;
+                $k = $setCode.'|'.$termCode;
                 $labelCodeBySetCode[$k] = $labelCode;
                 $labelCodes[] = $labelCode;
             }
         }
 
-        if ($labelCodes === []) {
+        if ([] === $labelCodes) {
             return;
         }
 
@@ -244,7 +246,7 @@ final class BabelPostLoadHydrator
         foreach ($trRows as $r) {
             $c = (string) ($r['str_code'] ?? '');
             $t = $r['text'] ?? null;
-            if ($c !== '') {
+            if ('' !== $c) {
                 $textByLabelCode[$c] = \is_string($t) ? $t : null;
             }
         }
@@ -256,18 +258,18 @@ final class BabelPostLoadHydrator
                 continue;
             }
 
-            $set      = (string) ($meta['set'] ?? '');
+            $set = (string) ($meta['set'] ?? '');
             $multiple = (bool) ($meta['multiple'] ?? false);
 
             $labels = [];
             foreach ($codes as $code) {
-                $k = $set . '|' . $code;
+                $k = $set.'|'.$code;
                 $labelCode = $labelCodeBySetCode[$k] ?? null;
-                $text = (\is_string($labelCode) && $labelCode !== '')
+                $text = (\is_string($labelCode) && '' !== $labelCode)
                     ? ($textByLabelCode[$labelCode] ?? null)
                     : null;
 
-                $labels[] = (\is_string($text) && $text !== '') ? $text : $code;
+                $labels[] = (\is_string($text) && '' !== $text) ? $text : $code;
             }
 
             $entity->setResolvedTerm($field, $multiple ? $labels : ($labels[0] ?? null));
@@ -277,21 +279,21 @@ final class BabelPostLoadHydrator
     private function resolveSourceLocale(object $entity, string $class): string
     {
         $cfg = $this->index->configFor($class) ?? [];
-        if (\is_string($cfg['sourceLocale'] ?? null) && $cfg['sourceLocale'] !== '') {
+        if (\is_string($cfg['sourceLocale'] ?? null) && '' !== $cfg['sourceLocale']) {
             return $cfg['sourceLocale'];
         }
 
         $acc = $this->index->localeAccessorFor($class);
         if ($acc) {
-            if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
+            if ('prop' === $acc['type'] && \property_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']} ?? null;
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }
-            if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
+            if ('method' === $acc['type'] && \method_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']}();
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }

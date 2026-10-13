@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -11,7 +12,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand('babel:index', 'Show the compile-time translatable index built by the compiler pass. --STILL NEEDED??')]
 final class TranslatableIndexCommand
 {
-    public function __construct(private readonly TranslatableIndex $index) {}
+    public function __construct(private readonly TranslatableIndex $index)
+    {
+    }
 
     public function __invoke(SymfonyStyle $io): int
     {
@@ -19,6 +22,7 @@ final class TranslatableIndexCommand
 
         if (!$all) {
             $io->warning('No translatable entities found in the compile-time index.');
+
             return Command::SUCCESS;
         }
 
@@ -28,15 +32,15 @@ final class TranslatableIndexCommand
             if (!empty($info['fields'])) {
                 foreach ($info['fields'] as $name => $meta) {
                     $ctx = $meta['context'] ?? '';
-                    $io->writeln("   - $name" . ($ctx ? " (context=$ctx)" : ''));
+                    $io->writeln("   - $name".($ctx ? " (context=$ctx)" : ''));
                 }
             }
             if (!empty($info['localeProp'])) {
-                $io->writeln("   localeProp: ".$info['localeProp']);
+                $io->writeln('   localeProp: '.$info['localeProp']);
             }
             if (!empty($info['needsHooks'])) {
-                $io->writeln("   needsHooks: yes".(
-                    !empty($info['fieldsNeedingHooks']) ? " (".\implode(', ', $info['fieldsNeedingHooks']).")" : ''
+                $io->writeln('   needsHooks: yes'.(
+                    !empty($info['fieldsNeedingHooks']) ? ' ('.\implode(', ', $info['fieldsNeedingHooks']).')' : ''
                 ));
             }
         }

@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\Traits;
@@ -10,7 +11,7 @@ use Survos\BabelBundle\Tests\App\Entity\SimpleOwner;
 final class TranslatableTraitTest extends TestCase
 {
     #[Test]
-    public function it_uses_backing_values_when_runtime_locale_is_not_initialized(): void
+    public function itUsesBackingValuesWhenRuntimeLocaleIsNotInitialized(): void
     {
         $o = new SimpleOwner();
         $o->label = 'Museum of Things';

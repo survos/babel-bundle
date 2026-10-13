@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -13,7 +14,8 @@ final class BabelLocaleDoctorCommand
 {
     public function __construct(
         private readonly LocaleContext $context,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -36,9 +38,9 @@ final class BabelLocaleDoctorCommand
         );
 
         // Allow null => reset to default
-        $target = $set === 'null' ? null : $set;
+        $target = 'null' === $set ? null : $set;
 
-        if ($set !== null) {
+        if (null !== $set) {
             $io->section('Switching');
             $io->writeln(sprintf('Setting locale to %s', $target ?? '(default)'));
             $this->context->set($target);
@@ -51,6 +53,7 @@ final class BabelLocaleDoctorCommand
         );
 
         $io->success('LocaleContext OK');
+
         return 0;
     }
 }

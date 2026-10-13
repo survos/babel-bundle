@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\EventListener;
@@ -8,12 +9,12 @@ use Doctrine\DBAL\Connection;
 use Doctrine\ORM\Event\PostLoadEventArgs;
 use Doctrine\ORM\Events;
 use Survos\BabelBundle\Attribute\BabelStorage;
-use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Debug\BabelDebugRecorderInterface;
 use Survos\BabelBundle\Service\LocaleContext;
-use Symfony\Component\HttpFoundation\RequestStack;
 use Survos\BabelBundle\Service\TranslatableIndex;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\Lingua\Core\Identity\HashUtil;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 #[AsDoctrineListener(event: Events::postLoad)]
 final class BabelDebugPostLoadListener
@@ -22,8 +23,9 @@ final class BabelDebugPostLoadListener
         private readonly Connection $connection,
         private readonly TranslatableIndex $index,
         private readonly ?LocaleContext $localeContext = null,
-        private readonly ?BabelDebugRecorderInterface $recorder=null, // doesn't exist in prod
-        private readonly ?RequestStack $requestStack = null,    ) {
+        private readonly ?BabelDebugRecorderInterface $recorder = null, // doesn't exist in prod
+        private readonly ?RequestStack $requestStack = null, )
+    {
     }
 
     public function __invoke(PostLoadEventArgs $args): void
@@ -31,7 +33,7 @@ final class BabelDebugPostLoadListener
         $entity = $args->getObject();
         $refl = new \ReflectionObject($entity);
 
-        if ($refl->getAttributes(BabelStorage::class) === []) {
+        if ([] === $refl->getAttributes(BabelStorage::class)) {
             return;
         }
 
@@ -71,10 +73,10 @@ final class BabelDebugPostLoadListener
         $hitCount = 0;
 
         foreach ($refl->getProperties() as $prop) {
-            if ($prop->getAttributes(Translatable::class) === []) {
+            if ([] === $prop->getAttributes(Translatable::class)) {
                 continue;
             }
-            $total++;
+            ++$total;
 
             $name = $prop->getName();
 
@@ -92,15 +94,15 @@ final class BabelDebugPostLoadListener
             }
 
             $applied = null;
-            if (\is_scalar($value) || $value === null) {
+            if (\is_scalar($value) || null === $value) {
                 $applied = ($value !== $backing);
                 if ($applied) {
-                    $appliedCount++;
+                    ++$appliedCount;
                 }
             }
 
             $srcLocale = HashUtil::normalizeLocale($this->resolveSourceLocaleForEntity($entity, $refl->getName()));
-            if ($srcLocale === '') {
+            if ('' === $srcLocale) {
                 $srcLocale = HashUtil::normalizeLocale($defaultLocale ?: 'en');
             }
 
@@ -108,21 +110,21 @@ final class BabelDebugPostLoadListener
             $hasRow = null;
             $translatedText = null;
 
-            if (\is_string($backing) && $backing !== '') {
+            if (\is_string($backing) && '' !== $backing) {
                 $strHash = HashUtil::calcSourceKey($backing, $srcLocale);
 
                 if ($effectiveLocale) {
                     [$hasRow, $translatedText] = $this->lookupTranslationByStrHash($strHash, (string) $effectiveLocale);
                     if ($hasRow) {
-                        $hitCount++;
+                        ++$hitCount;
                     } else {
-                        $missingCount++;
+                        ++$missingCount;
                     }
                 } else {
-                    $missingCount++;
+                    ++$missingCount;
                 }
             } else {
-                $missingCount++;
+                ++$missingCount;
             }
 
             $fields[] = [
@@ -136,7 +138,6 @@ final class BabelDebugPostLoadListener
                 'has_translation' => $hasRow,
                 'translated_text' => $translatedText,
             ];
-
         }
 
         $this->recorder->record('doctrine.postLoad', [
@@ -165,6 +166,7 @@ final class BabelDebugPostLoadListener
                 return $prop->getValue($entity);
             }
             $prop->setAccessible(true);
+
             return $prop->getValue($entity);
         } catch (\Throwable) {
             return null;
@@ -175,22 +177,22 @@ final class BabelDebugPostLoadListener
     {
         $cfg = $this->index->configFor($class) ?? [];
 
-        if (\is_string($cfg['sourceLocale'] ?? null) && $cfg['sourceLocale'] !== '') {
+        if (\is_string($cfg['sourceLocale'] ?? null) && '' !== $cfg['sourceLocale']) {
             return $cfg['sourceLocale'];
         }
 
         $acc = $this->index->localeAccessorFor($class);
         if ($acc) {
-            if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
+            if ('prop' === $acc['type'] && \property_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']} ?? null;
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }
 
-            if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
+            if ('method' === $acc['type'] && \method_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']}();
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }
@@ -213,15 +215,15 @@ SQL;
 
         try {
             $text = $this->connection->fetchOne($sql, ['sh' => $strHash, 'loc' => $locale]);
-            if ($text === false) {
+            if (false === $text) {
                 return [false, null];
             }
+
             return [true, \is_string($text) ? $text : null];
         } catch (\Throwable) {
             return [false, null];
         }
     }
-
 
     /**
      * Best-effort extraction of a str-code map from common conventions:
@@ -242,13 +244,14 @@ SQL;
                 $p->setAccessible(true);
                 $v = $p->getValue($entity);
                 if (\is_array($v)) {
-                    /** @var array<string,string> $v */
+                    /* @var array<string,string> $v */
                     return $v;
                 }
             } catch (\Throwable) {
                 // ignore
             }
         }
+
         return [];
     }
 
@@ -263,11 +266,13 @@ SQL;
                 $p = $refl->getProperty($propName);
                 $p->setAccessible(true);
                 $v = $p->getValue($entity);
-                return \is_string($v) && $v !== '' ? $v : null;
+
+                return \is_string($v) && '' !== $v ? $v : null;
             } catch (\Throwable) {
                 continue;
             }
         }
+
         return null;
     }
 
@@ -286,9 +291,10 @@ SQL;
 
         try {
             $text = $this->connection->fetchOne($sql, ['code' => $strCode, 'locale' => $locale]);
-            if ($text === false) {
+            if (false === $text) {
                 return [false, null];
             }
+
             return [true, \is_string($text) ? $text : null];
         } catch (\Throwable) {
             return [false, null];

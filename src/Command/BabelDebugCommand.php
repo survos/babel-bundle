@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -32,7 +33,8 @@ final class BabelDebugCommand
         private readonly array $allowedNamespaces = ['App\\Entity'],
         /** @var list<string> */
         private readonly array $scanRoots = [],
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -90,7 +92,7 @@ final class BabelDebugCommand
                 if ($class && $fqcn !== $class) {
                     continue;
                 }
-                $io->writeln(' - ' . $fqcn);
+                $io->writeln(' - '.$fqcn);
             }
 
             $io->writeln('Property-mode carriers');
@@ -98,7 +100,7 @@ final class BabelDebugCommand
                 if ($class && $fqcn !== $class) {
                     continue;
                 }
-                $io->writeln(' - ' . $fqcn);
+                $io->writeln(' - '.$fqcn);
             }
         }
 
@@ -111,19 +113,19 @@ final class BabelDebugCommand
                     continue;
                 }
 
-                $io->writeln("\n " . $fqcn);
+                $io->writeln("\n ".$fqcn);
 
                 $fields = $def['fields'] ?? [];
-                $io->writeln('   Fields: ' . json_encode($fields));
+                $io->writeln('   Fields: '.json_encode($fields));
 
                 if (array_key_exists('sourceLocale', $def)) {
-                    $io->writeln('   sourceLocale: ' . json_encode($def['sourceLocale']));
+                    $io->writeln('   sourceLocale: '.json_encode($def['sourceLocale']));
                 }
                 if (array_key_exists('targetLocales', $def)) {
-                    $io->writeln('   targetLocales: ' . json_encode($def['targetLocales']));
+                    $io->writeln('   targetLocales: '.json_encode($def['targetLocales']));
                 }
                 if (array_key_exists('localeAccessor', $def)) {
-                    $io->writeln('   localeAccessor: ' . json_encode($def['localeAccessor']));
+                    $io->writeln('   localeAccessor: '.json_encode($def['localeAccessor']));
                 }
             }
         }
@@ -131,7 +133,7 @@ final class BabelDebugCommand
         if ($scan) {
             $io->section('Live scan (property-mode translatable fields via #[Translatable])');
 
-            if ($em !== null) {
+            if (null !== $em) {
                 $io->note(sprintf(
                     'Option --em=%s is currently ignored: TranslatableScanner is configured via constructor (scan_entity_managers).',
                     $em
@@ -145,9 +147,9 @@ final class BabelDebugCommand
             }
 
             foreach ($map as $fqcn => $fields) {
-                $io->writeln("\n " . $fqcn);
+                $io->writeln("\n ".$fqcn);
                 foreach ($fields as $field) {
-                    $io->writeln('   - ' . $field);
+                    $io->writeln('   - '.$field);
                 }
             }
         }

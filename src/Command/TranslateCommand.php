@@ -1,14 +1,15 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
-use Survos\BabelBundle\Entity\Str;
-use Survos\BabelBundle\Entity\StrTranslation;
 use Survos\BabelBundle\Entity\Base\StrBase;
 use Survos\BabelBundle\Entity\Base\StrTranslationBase;
+use Survos\BabelBundle\Entity\Str;
+use Survos\BabelBundle\Entity\StrTranslation;
 use Survos\BabelBundle\Event\TranslateStringEvent;
 use Survos\BabelBundle\Service\ExternalTranslatorBridge;
 use Survos\BabelBundle\Service\LocaleContext;
@@ -28,11 +29,11 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 final class TranslateCommand
 {
     public function __construct(
-        private readonly EntityManagerInterface    $em,
-        private readonly LoggerInterface           $logger,
-        private readonly LocaleContext             $localeContext,
-        private readonly EventDispatcherInterface  $dispatcher,
-        private readonly TranslatableIndex         $index,
+        private readonly EntityManagerInterface $em,
+        private readonly LoggerInterface $logger,
+        private readonly LocaleContext $localeContext,
+        private readonly EventDispatcherInterface $dispatcher,
+        private readonly TranslatableIndex $index,
         private readonly ?ExternalTranslatorBridge $bridge = null, // soft dependency
     ) {
     }
@@ -43,11 +44,12 @@ final class TranslateCommand
     private function enabledLocales(): array
     {
         $enabled = $this->localeContext->getEnabled();
-        if ($enabled !== []) {
+        if ([] !== $enabled) {
             return array_values(array_unique($enabled));
         }
 
         $default = $this->localeContext->getDefault();
+
         return $default ? [$default] : [];
     }
 
@@ -84,8 +86,9 @@ final class TranslateCommand
         // Prompt if no locales provided and not --all
         if (!$localesArg && !$all) {
             $choices = $this->enabledLocales();
-            if ($choices === []) {
+            if ([] === $choices) {
                 $io->error('No enabled locales found (and no default locale).');
+
                 return Command::FAILURE;
             }
 
@@ -95,8 +98,9 @@ final class TranslateCommand
         }
 
         $targets = $this->resolveTargetLocales($io, $localesArg, $all);
-        if ($targets === null) {
+        if (null === $targets) {
             $io->warning('No target locales found.');
+
             return Command::FAILURE;
         }
 
@@ -106,31 +110,35 @@ final class TranslateCommand
         }
 
         // Engine requested but TranslatorBundle missing
-        if ($engine !== null && (!$this->bridge || !$this->bridge->isAvailable())) {
+        if (null !== $engine && (!$this->bridge || !$this->bridge->isAvailable())) {
             $io->error(implode("\n", [
                 'The --engine option requires SurvosTranslatorBundle.',
                 'Install it first:',
                 '  composer require survos/translator-bundle',
             ]));
+
             return Command::FAILURE;
         }
 
         // Entity sanity checks
         if (!class_exists($strClass) || !class_exists($trClass)) {
             $io->error('Str / StrTranslation class not found.');
+
             return Command::FAILURE;
         }
         if (!is_a($strClass, StrBase::class, true)) {
             $io->error('Str class must extend StrBase.');
+
             return Command::FAILURE;
         }
         if (!is_a($trClass, StrTranslationBase::class, true)) {
             $io->error('StrTranslation class must extend StrTranslationBase.');
+
             return Command::FAILURE;
         }
 
         $strRepo = $this->em->getRepository($strClass);
-        $trRepo  = $this->em->getRepository($trClass);
+        $trRepo = $this->em->getRepository($trClass);
 
         $grandTotal = 0;
 
@@ -158,7 +166,7 @@ final class TranslateCommand
                     $this->logger->warning('StrTranslation missing strCode; skipping.', [
                         'locale' => $targetLocale,
                     ]);
-                    $done++;
+                    ++$done;
                     continue;
                 }
 
@@ -167,9 +175,9 @@ final class TranslateCommand
                 if (!$str) {
                     $this->logger->warning('Missing Str for StrTranslation; skipping.', [
                         'str_code' => $code,
-                        'locale'   => $targetLocale,
+                        'locale' => $targetLocale,
                     ]);
-                    $done++;
+                    ++$done;
                     continue;
                 }
 
@@ -177,7 +185,7 @@ final class TranslateCommand
 
                 // Skip same-locale “translation”
                 if ($srcLocale === $targetLocale) {
-                    $done++;
+                    ++$done;
                     continue;
                 }
 
@@ -185,54 +193,54 @@ final class TranslateCommand
 
                 // 1) EVENT FIRST
                 $event = new TranslateStringEvent(
-                    hash:         $code,          // canonical STR key
-                    original:     $original,
+                    hash: $code,          // canonical STR key
+                    original: $original,
                     sourceLocale: $srcLocale,
                     targetLocale: $targetLocale,
-                    translated:   null
+                    translated: null
                 );
                 $this->dispatcher->dispatch($event);
                 $translated = $event->translated;
 
                 // 2) FALLBACK: TranslatorBundle
-                if (($translated === null || $translated === '')
+                if ((null === $translated || '' === $translated)
                     && $this->bridge
                     && $this->bridge->isAvailable()
                 ) {
                     try {
-                        $result     = $this->bridge->translate($original, $srcLocale, $targetLocale, $engine);
+                        $result = $this->bridge->translate($original, $srcLocale, $targetLocale, $engine);
                         $translated = (string) ($result['translatedText'] ?? '');
                     } catch (\Throwable $e) {
                         $this->logger->warning('Translator fallback failed', [
                             'str_code' => $code,
-                            'src'      => $srcLocale,
-                            'dst'      => $targetLocale,
-                            'err'      => $e->getMessage(),
+                            'src' => $srcLocale,
+                            'dst' => $targetLocale,
+                            'err' => $e->getMessage(),
                         ]);
                         $translated = null;
                     }
                 }
 
-                if ($translated === null || $translated === '') {
-                    $done++;
+                if (null === $translated || '' === $translated) {
+                    ++$done;
                     continue;
                 }
 
                 if (!$dryRun) {
-                    $tr->text      = $translated;
-                    $tr->status    = StrTranslationBase::STATUS_TRANSLATED;
-                    $tr->engine    = $engine;
+                    $tr->text = $translated;
+                    $tr->status = StrTranslationBase::STATUS_TRANSLATED;
+                    $tr->engine = $engine;
                     $tr->updatedAt = new \DateTimeImmutable();
                 }
 
-                $done++;
-                $grandTotal++;
+                ++$done;
+                ++$grandTotal;
 
                 if (!$dryRun && ($done % $batch) === 0) {
                     $this->em->flush();
                     $this->em->clear();
                     $strRepo = $this->em->getRepository($strClass);
-                    $trRepo  = $this->em->getRepository($trClass);
+                    $trRepo = $this->em->getRepository($trClass);
                 }
             }
 
@@ -258,23 +266,27 @@ final class TranslateCommand
     private function resolveTargetLocales(
         SymfonyStyle $io,
         ?string $localesArg,
-        bool $all
+        bool $all,
     ): ?array {
-        if ($localesArg && trim($localesArg) !== '') {
+        if ($localesArg && '' !== trim($localesArg)) {
             $targets = array_values(array_filter(array_map('trim', explode(',', $localesArg))));
-            return $targets !== [] ? $targets : null;
+
+            return [] !== $targets ? $targets : null;
         }
 
         if ($all) {
             $locales = $this->enabledLocales();
-            if ($locales === []) {
+            if ([] === $locales) {
                 $io->warning('No enabled locales found.');
+
                 return null;
             }
+
             return $locales;
         }
 
         $io->warning('Specify locales (e.g. "es,fr") or pass --all.');
+
         return null;
     }
 
@@ -283,16 +295,16 @@ final class TranslateCommand
         $acc = $this->index->localeAccessorFor($str::class)
             ?? ['type' => 'prop', 'name' => 'sourceLocale'];
 
-        if ($acc['type'] === 'prop' && property_exists($str, $acc['name'])) {
+        if ('prop' === $acc['type'] && property_exists($str, $acc['name'])) {
             $v = $str->{$acc['name']} ?? null;
-            if (is_string($v) && $v !== '') {
+            if (is_string($v) && '' !== $v) {
                 return $v;
             }
         }
 
-        if ($acc['type'] === 'method' && method_exists($str, $acc['name'])) {
+        if ('method' === $acc['type'] && method_exists($str, $acc['name'])) {
             $v = $str->{$acc['name']}();
-            if (is_string($v) && $v !== '') {
+            if (is_string($v) && '' !== $v) {
                 return $v;
             }
         }

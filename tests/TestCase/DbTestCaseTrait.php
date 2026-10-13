@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\TestCase;
@@ -18,6 +19,7 @@ trait DbTestCaseTrait
 
         /** @var EntityManagerInterface $em */
         $em = static::getContainer()->get(EntityManagerInterface::class);
+
         return $this->em = $em;
     }
 
@@ -35,7 +37,7 @@ trait DbTestCaseTrait
         $tool = new SchemaTool($em);
 
         $classes = $em->getMetadataFactory()->getAllMetadata();
-        if ($classes !== []) {
+        if ([] !== $classes) {
             $tool->dropSchema($classes);
             $tool->createSchema($classes);
         }

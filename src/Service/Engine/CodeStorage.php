@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service\Engine;
@@ -20,7 +21,8 @@ final class CodeStorage implements StringStorage
     public function __construct(
         private readonly ManagerRegistry $registry,
         private readonly array $enabledLocales = [],
-    ) {}
+    ) {
+    }
 
     public function populate(object $carrier, ?string $emName = null): int
     {
@@ -29,14 +31,14 @@ final class CodeStorage implements StringStorage
         }
 
         $conn = $this->conn($emName);
-        $src  = \method_exists($carrier, 'getSourceLocale') && \is_string($carrier->getSourceLocale())
+        $src = \method_exists($carrier, 'getSourceLocale') && \is_string($carrier->getSourceLocale())
             ? $carrier->getSourceLocale()
             : 'en';
 
         $n = 0;
         foreach ($carrier->getStringCodeMap() as $field => $code) {
             $original = $carrier->getOriginalFor($field);
-            if (!\is_string($original) || $original === '') {
+            if (!\is_string($original) || '' === $original) {
                 continue;
             }
 
@@ -45,13 +47,13 @@ final class CodeStorage implements StringStorage
 
             // Placeholders so babel:translate can find blanks
             foreach ($this->enabledLocales as $loc) {
-                if (!\is_string($loc) || $loc === '' || $loc === $src) {
+                if (!\is_string($loc) || '' === $loc || $loc === $src) {
                     continue;
                 }
                 $this->ensureTrPlaceholder($conn, $code, $loc);
             }
 
-            $n++;
+            ++$n;
         }
 
         return $n;
@@ -62,6 +64,7 @@ final class CodeStorage implements StringStorage
     private function conn(?string $emName): Connection
     {
         $em = $this->registry->getManager($emName);
+
         return $em->getConnection();
     }
 
@@ -76,7 +79,9 @@ final class CodeStorage implements StringStorage
             'original' => $original, 'src' => $src, 'hash' => $hash,
         ]);
 
-        if ($updated > 0) return;
+        if ($updated > 0) {
+            return;
+        }
 
         try {
             $sqlInsert = 'INSERT INTO str (hash, original, src_locale, created_at, updated_at)
@@ -103,7 +108,9 @@ final class CodeStorage implements StringStorage
             'text' => $text, 'hash' => $hash, 'loc' => $srcLocale,
         ]);
 
-        if ($updated > 0) return;
+        if ($updated > 0) {
+            return;
+        }
 
         try {
             $sqlInsert = 'INSERT INTO str_translation (hash, locale, text, created_at, updated_at)

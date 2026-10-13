@@ -1,11 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
 
 final class ExternalTranslatorBridge
 {
-    /** @var object|null */
     private ?object $manager;
 
     public function __construct(?object $manager = null)
@@ -25,9 +25,12 @@ final class ExternalTranslatorBridge
     /** @return string[] */
     public function names(): array
     {
-        if (!$this->isAvailable()) return [];
+        if (!$this->isAvailable()) {
+            return [];
+        }
         /** @var array $names */
         $names = $this->manager->names();
+
         return array_values($names);
     }
 
@@ -52,7 +55,7 @@ final class ExternalTranslatorBridge
         return [
             'translatedText' => $res->translatedText,
             'detectedSource' => $res->detectedSource,
-            'engine'         => $svc->getName(),
+            'engine' => $svc->getName(),
         ];
     }
 }

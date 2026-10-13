@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -20,7 +21,8 @@ final class TranslationsEnsureCommand
     public function __construct(
         private readonly Connection $db,
         private readonly LocaleContext $localeContext,
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
@@ -28,7 +30,6 @@ final class TranslationsEnsureCommand
         #[Argument('Target locales (comma-delimited) or empty to use enabled_locales')] ?string $localesArg = null,
         #[Option('Filter by STR.source_locale')] ?string $sourceLocale = null,
         #[Option('Filter by STR.context substring (e.g. "term:" or "pixie:cleveland")')] ?string $context = null,
-
         #[Option('Provider engine value for STR_TR rows (optional; NOT a stub marker).')]
         ?string $engine = null,
 
@@ -43,53 +44,55 @@ final class TranslationsEnsureCommand
     ): int {
         $targets = $this->parseLocalesArg($localesArg);
 
-        if ($targets === []) {
+        if ([] === $targets) {
             $targets = $this->localeContext->getEnabled();
-            if ($targets === []) {
+            if ([] === $targets) {
                 $targets = [$this->localeContext->getDefault()];
             }
         }
 
         $targets = array_values(array_unique(array_map([HashUtil::class, 'normalizeLocale'], $targets)));
-        $targets = array_values(array_filter($targets, static fn(string $l) => $l !== ''));
+        $targets = array_values(array_filter($targets, static fn (string $l) => '' !== $l));
 
-        if ($targets === []) {
+        if ([] === $targets) {
             $io->error('No target locales resolved.');
+
             return Command::INVALID;
         }
 
         $extraMeta = [];
-        if ($meta !== null && trim($meta) !== '') {
+        if (null !== $meta && '' !== trim($meta)) {
             $decoded = json_decode($meta, true);
             if (!is_array($decoded)) {
                 $io->error('Invalid --meta JSON. Must be a JSON object.');
+
                 return Command::INVALID;
             }
             $extraMeta = $decoded;
         }
 
         $io->title('Babel ensure');
-        $io->writeln('Targets: ' . json_encode($targets, JSON_UNESCAPED_SLASHES));
-        $io->writeln('Engine:  ' . ($engine ?? '(null)'));
-        $io->writeln('Status:  ' . $status);
+        $io->writeln('Targets: '.json_encode($targets, JSON_UNESCAPED_SLASHES));
+        $io->writeln('Engine:  '.($engine ?? '(null)'));
+        $io->writeln('Status:  '.$status);
 
         $filters = [];
         $paramsBase = [
             'eng' => $engine, // may be null
-            'st'  => $status,
+            'st' => $status,
         ];
 
-        if ($sourceLocale !== null && trim($sourceLocale) !== '') {
+        if (null !== $sourceLocale && '' !== trim($sourceLocale)) {
             $paramsBase['sl'] = HashUtil::normalizeLocale($sourceLocale);
-            $filters[] = 's.' . BabelSchema::STR_SOURCE_LOCALE . ' = :sl';
+            $filters[] = 's.'.BabelSchema::STR_SOURCE_LOCALE.' = :sl';
         }
 
-        if ($context !== null && trim($context) !== '') {
-            $paramsBase['ctx'] = '%' . $context . '%';
-            $filters[] = 's.' . BabelSchema::STR_CONTEXT . ' LIKE :ctx';
+        if (null !== $context && '' !== trim($context)) {
+            $paramsBase['ctx'] = '%'.$context.'%';
+            $filters[] = 's.'.BabelSchema::STR_CONTEXT.' LIKE :ctx';
         }
 
-        $filterSql = $filters ? (' AND ' . implode(' AND ', $filters)) : '';
+        $filterSql = $filters ? (' AND '.implode(' AND ', $filters)) : '';
 
         $totalCreated = 0;
 
@@ -163,7 +166,7 @@ final class TranslationsEnsureCommand
                 BabelSchema::STR_TABLE,
                 BabelSchema::STR_SOURCE_LOCALE,
                 $filterSql,
-                $limit > 0 ? (' LIMIT ' . (int) $limit) : '',
+                $limit > 0 ? (' LIMIT '.(int) $limit) : '',
                 $conflictClause
             );
 
@@ -174,18 +177,20 @@ final class TranslationsEnsureCommand
         }
 
         $io->success(sprintf('Done → STR_TR created %d', $totalCreated));
+
         return Command::SUCCESS;
     }
 
     /** @return list<string> */
     private function parseLocalesArg(?string $localesArg): array
     {
-        if ($localesArg === null || trim($localesArg) === '') {
+        if (null === $localesArg || '' === trim($localesArg)) {
             return [];
         }
 
         $parts = array_values(array_filter(array_map('trim', explode(',', $localesArg))));
         $parts = array_values(array_unique(array_map([HashUtil::class, 'normalizeLocale'], $parts)));
-        return array_values(array_filter($parts, static fn(string $l) => $l !== ''));
+
+        return array_values(array_filter($parts, static fn (string $l) => '' !== $l));
     }
 }

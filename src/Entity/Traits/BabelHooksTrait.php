@@ -1,10 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Entity\Traits;
 
-use Survos\Lingua\Core\Identity\HashUtil;
 use Survos\BabelBundle\Runtime\BabelRuntime;
+use Survos\Lingua\Core\Identity\HashUtil;
 
 /**
  * Attach to entities with #[Translatable] property hooks.
@@ -42,7 +43,7 @@ trait BabelHooksTrait
      */
     protected function resolveTranslatable(string $field, ?string $backingValue, ?string $context = null): ?string
     {
-        if ($backingValue === null || $backingValue === '') {
+        if (null === $backingValue || '' === $backingValue) {
             return $backingValue;
         }
 
@@ -51,7 +52,7 @@ trait BabelHooksTrait
         }
 
         $displayLocale = BabelRuntime::getLocale();
-        if ($displayLocale === null || $displayLocale === '') {
+        if (null === $displayLocale || '' === $displayLocale) {
             return $backingValue;
         }
 
@@ -62,12 +63,12 @@ trait BabelHooksTrait
         $sourceLocale = HashUtil::normalizeLocale($sourceLocale);
         $displayLocale = HashUtil::normalizeLocale($displayLocale);
 
-        $codes   = $this->tCodes ?? [];
+        $codes = $this->tCodes ?? [];
         $strHash = $codes[$field] ?? HashUtil::calcSourceKey($backingValue, $sourceLocale);
 
         $text = BabelRuntime::lookup($strHash, $displayLocale);
 
-        $resolved = ($text !== null && $text !== '') ? $text : $backingValue;
+        $resolved = (null !== $text && '' !== $text) ? $text : $backingValue;
 
         return $this->_resolved[$field] = $resolved;
     }
@@ -109,14 +110,10 @@ trait BabelHooksTrait
      */
     public function getBackingValue(string $field): mixed
     {
-        $prop = $field . 'Backing';
+        $prop = $field.'Backing';
 
         if (!\property_exists($this, $prop)) {
-            throw new \LogicException(sprintf(
-                'BabelHooksTrait: missing backing property "%s" on %s. Expected convention: <field>Backing.',
-                $prop,
-                static::class
-            ));
+            throw new \LogicException(sprintf('BabelHooksTrait: missing backing property "%s" on %s. Expected convention: <field>Backing.', $prop, static::class));
         }
 
         return $this->$prop;

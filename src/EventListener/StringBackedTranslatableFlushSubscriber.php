@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\EventListener;
@@ -13,11 +14,11 @@ use Doctrine\ORM\Event\OnFlushEventArgs;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Events;
 use Psr\Log\LoggerInterface;
-use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\BabelBundle\Runtime\BabelSchema;
 use Survos\BabelBundle\Service\LocaleContext;
 use Survos\BabelBundle\Service\TargetLocaleResolver;
 use Survos\BabelBundle\Service\TranslatableIndex;
+use Survos\Lingua\Contracts\Attribute\Translatable;
 use Survos\Lingua\Core\Identity\HashUtil;
 use Symfony\Contracts\Service\ResetInterface;
 
@@ -47,7 +48,8 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
         private readonly TranslatableIndex $index,
         private readonly TargetLocaleResolver $targetLocaleResolver,
         private readonly bool $debug = false,
-    ) {}
+    ) {
+    }
 
     public function getSubscribedEvents(): array
     {
@@ -56,10 +58,10 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
 
     public function onFlush(OnFlushEventArgs $args): void
     {
-        $this->pending         = [];
+        $this->pending = [];
         $this->pendingWithText = [];
 
-        $em  = $args->getObjectManager();
+        $em = $args->getObjectManager();
         $uow = $em->getUnitOfWork();
 
         foreach (\array_merge(
@@ -85,22 +87,22 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
             return;
         }
 
-        if ($this->pending === [] && $this->pendingWithText === []) {
+        if ([] === $this->pending && [] === $this->pendingWithText) {
             return;
         }
 
         $this->inPostFlush = true;
 
-        $em   = $args->getObjectManager();
+        $em = $args->getObjectManager();
         $conn = $em->getConnection();
-        $pf   = $conn->getDatabasePlatform();
+        $pf = $conn->getDatabasePlatform();
 
         $strTable = BabelSchema::STR_TABLE;          // "str"
-        $trTable  = BabelSchema::STR_TR_TABLE;     // "str_tr"
+        $trTable = BabelSchema::STR_TR_TABLE;     // "str_tr"
 
         $sqlStrUpsert = $this->buildSqlStrUpsert($pf, $strTable);
-        $sqlTrEnsure  = $this->buildSqlTrEnsure($pf, $trTable);
-        $sqlTrUpsert  = $this->buildSqlTrUpsert($pf, $trTable);
+        $sqlTrEnsure = $this->buildSqlTrEnsure($pf, $trTable);
+        $sqlTrUpsert = $this->buildSqlTrUpsert($pf, $trTable);
 
         $started = false;
 
@@ -113,11 +115,11 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
             // Phase 1: STR upserts
             foreach ($this->pending as $code => $row) {
                 $params = [
-                    'code'          => $code,
+                    'code' => $code,
                     'source_locale' => $row['sourceLocale'],
-                    'source'        => $row['source'],
-                    'context'       => $row['context'],
-                    'meta'          => \json_encode($row['meta'], JSON_THROW_ON_ERROR),
+                    'source' => $row['source'],
+                    'context' => $row['context'],
+                    'meta' => \json_encode($row['meta'], JSON_THROW_ON_ERROR),
                 ];
 
                 try {
@@ -136,15 +138,15 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
             foreach ($this->pending as $code => $row) {
                 foreach ($row['targetLocales'] as $locRaw) {
                     $loc = HashUtil::normalizeLocale((string) $locRaw);
-                    if ($loc === '') {
+                    if ('' === $loc) {
                         continue;
                     }
 
                     $params = [
-                        'str_code'      => $code,
+                        'str_code' => $code,
                         'target_locale' => $loc,
-                        'engine'        => self::BABEL_ENGINE,
-                        'meta'          => \json_encode([], JSON_THROW_ON_ERROR),
+                        'engine' => self::BABEL_ENGINE,
+                        'meta' => \json_encode([], JSON_THROW_ON_ERROR),
                     ];
 
                     try {
@@ -162,16 +164,16 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
             // Phase 3: TR upserts (text)
             foreach ($this->pendingWithText as $r) {
                 $loc = HashUtil::normalizeLocale($r['target_locale']);
-                if ($loc === '' || $r['text'] === '') {
+                if ('' === $loc || '' === $r['text']) {
                     continue;
                 }
 
                 $params = [
-                    'str_code'      => $r['str_code'],
+                    'str_code' => $r['str_code'],
                     'target_locale' => $loc,
-                    'engine'        => $r['engine'] ?? self::BABEL_ENGINE,
-                    'text'          => $r['text'],
-                    'meta'          => \json_encode([], JSON_THROW_ON_ERROR),
+                    'engine' => $r['engine'] ?? self::BABEL_ENGINE,
+                    'text' => $r['text'],
+                    'meta' => \json_encode([], JSON_THROW_ON_ERROR),
                 ];
 
                 try {
@@ -196,16 +198,16 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
 
             $this->logger->error('Babel postFlush failed', [
                 'exception' => $e::class,
-                'message'   => $e->getMessage(),
+                'message' => $e->getMessage(),
             ]);
 
             if ($this->debug) {
                 throw $e;
             }
         } finally {
-            $this->pending         = [];
+            $this->pending = [];
             $this->pendingWithText = [];
-            $this->inPostFlush      = false;
+            $this->inPostFlush = false;
         }
     }
 
@@ -243,7 +245,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
                       meta         = VALUES(meta)";
         }
 
-        throw new \RuntimeException('Unsupported DB platform for STR upsert: ' . $pf::class);
+        throw new \RuntimeException('Unsupported DB platform for STR upsert: '.$pf::class);
     }
 
     private function buildSqlTrEnsure(object $pf, string $trTable): string
@@ -341,9 +343,9 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
         $class = $entity::class;
 
         $fields = $this->index->fieldsFor($class);
-        if ($fields === []) {
+        if ([] === $fields) {
             $fields = $this->discoverTranslatableFieldsFallback($entity);
-            if ($fields === []) {
+            if ([] === $fields) {
                 return 0;
             }
         }
@@ -352,12 +354,12 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
             return 0;
         }
 
-        $srcLocale    = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
-        $cfg          = $this->index->configFor($class) ?? [];
+        $srcLocale = HashUtil::normalizeLocale($this->resolveSourceLocale($entity, $class));
+        $cfg = $this->index->configFor($class) ?? [];
         $classTargets = $cfg['targetLocales'] ?? null;
 
         $enabled = $this->locale->getEnabled();
-        if ($enabled === []) {
+        if ([] === $enabled) {
             $enabled = [$this->locale->getDefault()];
         }
 
@@ -371,21 +373,21 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
 
         foreach ($fields as $field) {
             $original = $entity->getBackingValue($field);
-            if (!\is_string($original) || $original === '') {
+            if (!\is_string($original) || '' === $original) {
                 continue;
             }
 
             $strCode = HashUtil::calcSourceKey($original, $srcLocale);
 
             $this->pending[$strCode] = [
-                'source'        => $original,
-                'sourceLocale'  => $srcLocale,
-                'context'       => null,
+                'source' => $original,
+                'sourceLocale' => $srcLocale,
+                'context' => null,
                 'targetLocales' => $resolvedTargets,
-                'meta'          => [],
+                'meta' => [],
             ];
 
-            $count++;
+            ++$count;
         }
 
         return $count;
@@ -395,21 +397,21 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
     {
         $cfg = $this->index->configFor($class) ?? [];
 
-        if (\is_string($cfg['sourceLocale'] ?? null) && $cfg['sourceLocale'] !== '') {
+        if (\is_string($cfg['sourceLocale'] ?? null) && '' !== $cfg['sourceLocale']) {
             return $cfg['sourceLocale'];
         }
 
         $acc = $this->index->localeAccessorFor($class);
         if ($acc) {
-            if ($acc['type'] === 'prop' && \property_exists($entity, $acc['name'])) {
+            if ('prop' === $acc['type'] && \property_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']} ?? null;
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }
-            if ($acc['type'] === 'method' && \method_exists($entity, $acc['name'])) {
+            if ('method' === $acc['type'] && \method_exists($entity, $acc['name'])) {
                 $v = $entity->{$acc['name']}();
-                if (\is_string($v) && $v !== '') {
+                if (\is_string($v) && '' !== $v) {
                     return $v;
                 }
             }
@@ -421,11 +423,11 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
     /** @return list<string> */
     private function discoverTranslatableFieldsFallback(object $entity): array
     {
-        $rc  = new \ReflectionClass($entity);
+        $rc = new \ReflectionClass($entity);
         $out = [];
 
         foreach ($rc->getProperties() as $prop) {
-            if ($prop->getAttributes(Translatable::class) !== []) {
+            if ([] !== $prop->getAttributes(Translatable::class)) {
                 $out[] = $prop->getName();
             }
         }
@@ -437,9 +439,9 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
     {
         $this->logger->error("Babel phase failed: {$phase}", [
             'exception' => $e::class,
-            'message'   => $e->getMessage(),
-            'sql'       => $sql,
-            'params'    => $params,
+            'message' => $e->getMessage(),
+            'sql' => $sql,
+            'params' => $params,
         ]);
     }
 

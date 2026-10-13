@@ -1,7 +1,9 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\App\Service;
+
 use Survos\TranslatorBundle\Contract\TranslatorEngineInterface;
 use Survos\TranslatorBundle\Model\EngineCapabilities;
 use Survos\TranslatorBundle\Model\LanguageDetectionResult;
@@ -16,7 +18,6 @@ final class FakeTranslator implements TranslatorEngineInterface
     {
         dd($req);
     }
-
 
     public function getName(): string
     {

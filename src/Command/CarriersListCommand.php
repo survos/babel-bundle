@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
@@ -29,8 +30,8 @@ final class CarriersListCommand
         $default = $this->localeContext->getDefault();
         $enabled = $this->localeContext->getEnabled();
         $io->listing([
-            'default:  ' . $default,
-            'enabled:  ' . \json_encode($enabled, JSON_UNESCAPED_SLASHES),
+            'default:  '.$default,
+            'enabled:  '.\json_encode($enabled, JSON_UNESCAPED_SLASHES),
         ]);
 
         // Code-mode carriers
@@ -44,25 +45,25 @@ final class CarriersListCommand
         $globalEnabled = $enabled ?: [$default];
 
         foreach ($all['property'] ?? [] as $fqcn) {
-            $cfg        = $this->index->configFor($fqcn) ?? [];
-            $source     = $cfg['sourceLocale'] ?? null;
+            $cfg = $this->index->configFor($fqcn) ?? [];
+            $source = $cfg['sourceLocale'] ?? null;
             $targetsRaw = $this->index->targetLocalesFor($fqcn);
-            $targetsEff = $targetsRaw === null ? $globalEnabled : $targetsRaw;
+            $targetsEff = null === $targetsRaw ? $globalEnabled : $targetsRaw;
 
             $pieces = [];
             if ($source) {
-                $pieces[] = 'src=' . $source;
+                $pieces[] = 'src='.$source;
             }
-            if ($targetsRaw === []) {
+            if ([] === $targetsRaw) {
                 $pieces[] = 'targets=[] (no translations)';
             } else {
-                $pieces[] = 'targets=' . \json_encode($targetsEff, JSON_UNESCAPED_SLASHES);
+                $pieces[] = 'targets='.\json_encode($targetsEff, JSON_UNESCAPED_SLASHES);
             }
 
-            $suffix = $pieces ? ' [' . \implode(', ', $pieces) . ']' : '';
+            $suffix = $pieces ? ' ['.\implode(', ', $pieces).']' : '';
 
             // If there's no entry in the index at all, flag it.
-            if ($cfg === []) {
+            if ([] === $cfg) {
                 $suffix .= ' (no compile-time index entry)';
             }
 

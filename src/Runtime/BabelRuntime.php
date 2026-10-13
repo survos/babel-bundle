@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Runtime;
@@ -22,16 +23,16 @@ final class BabelRuntime
     private static ?string $locale = null;
     private static string $fallback = 'en';
 
-    /** @var null|callable(string $text, string $srcLocale, ?string $context): string */
-    private static $hashFn = null;
+    /** @var callable(string, string, ?string): string|null */
+    private static $hashFn;
 
     // ---- init / setters -----------------------------------------------------
 
     public static function init(?string $locale, string $fallback = 'en', ?callable $hashFn = null): void
     {
-        self::$locale   = $locale;
+        self::$locale = $locale;
         self::$fallback = $fallback;
-        self::$hashFn   = $hashFn;
+        self::$hashFn = $hashFn;
     }
 
     public static function setLocale(?string $locale): void
@@ -72,10 +73,11 @@ final class BabelRuntime
         if (self::$hashFn) {
             /** @var callable $fn */
             $fn = self::$hashFn;
+
             return $fn($text, $srcLocale, $context);
         }
 
-        return \hash('xxh3', $srcLocale . "\0" . (string) ($context ?? '') . "\0" . $text);
+        return \hash('xxh3', $srcLocale."\0".(string) ($context ?? '')."\0".$text);
     }
 
     /**

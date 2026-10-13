@@ -1,10 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 // Composer autoload
-$autoload = __DIR__ . '/../../vendor/autoload.php';
+$autoload = __DIR__.'/../../vendor/autoload.php';
 if (!is_file($autoload)) {
-    $autoload = __DIR__ . '/../vendor/autoload.php';
+    $autoload = __DIR__.'/../vendor/autoload.php';
 }
 require_once $autoload;
 
@@ -15,7 +16,7 @@ spl_autoload_register(function (string $class): void {
         return;
     }
     $relative = str_replace('\\', '/', substr($class, strlen($prefix)));
-    $file = __DIR__ . '/' . $relative . '.php';
+    $file = __DIR__.'/'.$relative.'.php';
     if (is_file($file)) {
         require $file;
     }

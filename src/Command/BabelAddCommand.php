@@ -1,11 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Command;
 
-use ReflectionClass;
-use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Argument;
+use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Attribute\Option;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Command\SignalableCommandInterface;
@@ -19,12 +19,13 @@ final class BabelAddCommand implements SignalableCommandInterface
 
     public function __construct(
         private readonly Filesystem $fs = new Filesystem(),
-    ) {}
+    ) {
+    }
 
     public function __invoke(
         SymfonyStyle $io,
-        #[Argument('Entity class (FQCN or short, e.g. App\\Entity\\Article or Article)')] ?string $entity=null,
-        #[Argument('Property name to add (e.g. bio)')] ?string $field=null,
+        #[Argument('Entity class (FQCN or short, e.g. App\\Entity\\Article or Article)')] ?string $entity = null,
+        #[Argument('Property name to add (e.g. bio)')] ?string $field = null,
         #[Option('Use TEXT instead of STRING')] ?bool $text = null,
         #[Option('Optional translation context (e.g. "article")')] ?string $context = null,
         #[Option('Optional human description for translators')] ?string $description = null,
@@ -45,9 +46,6 @@ final class BabelAddCommand implements SignalableCommandInterface
             }
         }
 
-
-
-
         if ($interactive) {
             if (!\str_contains($entity, '\\')) {
                 $entity = $io->ask('Entity (FQCN or short)', $entity ?: 'Article');
@@ -57,7 +55,7 @@ final class BabelAddCommand implements SignalableCommandInterface
             }
             $text = $io->confirm('Use TEXT column type?', $text);
             if (!$text) {
-                $length = (int)$io->ask('Length for STRING', (string)($length ?? 255));
+                $length = (int) $io->ask('Length for STRING', (string) ($length ?? 255));
             }
             $nullable = $io->confirm('Nullable backing column?', $nullable);
             $context = $io->ask('Context (optional)', $context);
@@ -73,28 +71,32 @@ final class BabelAddCommand implements SignalableCommandInterface
                 $entity,
                 implode(', ', $this->guesses($entity, ['', 'App\\Entity\\', 'App\\']))
             ));
+
             return Command::FAILURE;
         }
 
         if ($this->shouldStop) {
             $io->warning('Aborted (signal received).');
+
             return Command::FAILURE;
         }
 
-
-        $refl = new ReflectionClass($entityFqcn);
+        $refl = new \ReflectionClass($entityFqcn);
         if (!$refl->isUserDefined()) {
             $io->error('Target class is not user-defined.');
+
             return Command::FAILURE;
         }
         $file = $refl->getFileName();
         if (!$file || !is_file($file) || !is_readable($file)) {
             $io->error('Cannot read entity source file.');
+
             return Command::FAILURE;
         }
-        $original = (string)file_get_contents($file);
+        $original = (string) file_get_contents($file);
         if (!preg_match('/\bclass\s+'.preg_quote($refl->getShortName(), '/').'\b/s', $original)) {
             $io->error('Could not locate class declaration.');
+
             return Command::FAILURE;
         }
 
@@ -104,6 +106,7 @@ final class BabelAddCommand implements SignalableCommandInterface
         // Idempotency: already added?
         if (preg_match('/\bpublic\s+\??string\s+\$'.preg_quote($field, '/').'\b/', $code) || str_contains($code, '$'.$backing)) {
             $io->success('Field already exists; nothing to do.');
+
             return Command::SUCCESS;
         }
 
@@ -120,6 +123,7 @@ final class BabelAddCommand implements SignalableCommandInterface
                     $io->note(sprintf('Injected use %s;', $userTrait));
                 } else {
                     $io->error('BabelHooksTrait missing. Re-run with --force-hooks to inject it.');
+
                     return Command::FAILURE;
                 }
             } else {
@@ -136,12 +140,12 @@ final class BabelAddCommand implements SignalableCommandInterface
 
         $colType = $text ? 'Types::TEXT' : 'Types::STRING';
         $nullableStr = $nullable ? 'true' : 'false';
-        $lengthLine = $text ? '' : ', length: '.(int)($length ?? 255);
+        $lengthLine = $text ? '' : ', length: '.(int) ($length ?? 255);
         $ctxPhp = var_export($context, true);
         $descPhp = var_export($description, true);
 
         $translatableArgs = 'context: '.$ctxPhp;
-        if ($description !== null) {
+        if (null !== $description) {
             $translatableArgs .= ', description: '.$descPhp;
         }
 
@@ -162,6 +166,7 @@ PHPBLOCK;
 
         if ($this->shouldStop) {
             $io->warning('Aborted (signal received).');
+
             return Command::FAILURE;
         }
 
@@ -178,7 +183,7 @@ PHPBLOCK;
 
         if (!$inserted) {
             $start = '/\/\*\s*Translatable\s+Fields\s*\*\/\s*/i';
-            $end   = '/\/\*\s*End\s+Translatable\s+Fields\s*\*\/\s*/i';
+            $end = '/\/\*\s*End\s+Translatable\s+Fields\s*\*\/\s*/i';
             if (preg_match($start, $code, $m, PREG_OFFSET_CAPTURE)) {
                 $pos = $m[0][1] + strlen($m[0][0]);
                 $code = substr($code, 0, $pos)."\n".$block.substr($code, $pos);
@@ -195,7 +200,7 @@ PHPBLOCK;
 
         if (!$inserted) {
             $replaced = preg_replace('/\}\s*$/', rtrim($block)."\n}\n", $code, 1, $count);
-            if ($count === 1) {
+            if (1 === $count) {
                 $code = $replaced;
                 $inserted = true;
             }
@@ -203,12 +208,14 @@ PHPBLOCK;
 
         if (!$inserted) {
             $io->error('Failed to find a safe insertion point.');
+
             return Command::FAILURE;
         }
 
         if ($dry) {
             $io->writeln($this->diff($original, $code, $file));
             $io->success('Dry run (diff only).');
+
             return Command::SUCCESS;
         }
 
@@ -217,6 +224,7 @@ PHPBLOCK;
         $this->fs->copy($file, $backup, true);
         if (false === file_put_contents($file, $code)) {
             $io->error('Failed to write modified file.');
+
             return Command::FAILURE;
         }
 
@@ -239,6 +247,7 @@ PHPBLOCK;
                 return $fq;
             }
         }
+
         return $input;
     }
 
@@ -251,6 +260,7 @@ PHPBLOCK;
         foreach ($prefixes as $pfx) {
             $out[] = $pfx.$input;
         }
+
         return $out;
     }
 
@@ -262,6 +272,7 @@ PHPBLOCK;
                 return $fq;
             }
         }
+
         return null;
     }
 
@@ -275,11 +286,12 @@ PHPBLOCK;
             return $code;
         }
         $nsEnd = $m[0][1] + strlen($m[0][0]);
-        $head  = substr($code, 0, $nsEnd);
-        $tail  = substr($code, $nsEnd);
+        $head = substr($code, 0, $nsEnd);
+        $tail = substr($code, $nsEnd);
 
         if (preg_match('/^(?:\s*use\s+[^;]+;\s*)+/m', $tail, $useBlock, PREG_OFFSET_CAPTURE)) {
             $pos = $nsEnd + $useBlock[0][1] + strlen($useBlock[0][0]);
+
             return substr($code, 0, $pos)."\n".$useLine."\n".substr($code, $pos);
         }
 
@@ -296,8 +308,10 @@ PHPBLOCK;
             if (preg_match('/\buse\s+'.$short.'\s*;\s*$/m', $code)) {
                 return $code;
             }
+
             return substr($code, 0, $pos)."\n    use ".$short.";\n".substr($code, $pos);
         }
+
         return $code;
     }
 
@@ -398,36 +412,44 @@ PHPX);
         $i = $j = 0;
         while ($i < count($o) || $j < count($n)) {
             if ($i < count($o) && $j < count($n) && $o[$i] === $n[$j]) {
-                $i++; $j++;
+                ++$i;
+                ++$j;
                 continue;
             }
-            $hOld = $i; $hNew = $j;
-            $hunkOld = []; $hunkNew = [];
-            for ($k = 0; $k < 200 && ($i < count($o) || $j < count($n)); $k++) {
+            $hOld = $i;
+            $hNew = $j;
+            $hunkOld = [];
+            $hunkNew = [];
+            for ($k = 0; $k < 200 && ($i < count($o) || $j < count($n)); ++$k) {
                 if ($i < count($o) && $j < count($n) && $o[$i] === $n[$j]) {
                     break;
                 }
                 $hunkOld[] = $i < count($o) ? $o[$i++] : null;
                 $hunkNew[] = $j < count($n) ? $n[$j++] : null;
             }
-            $lenOld = count(array_filter($hunkOld, static fn($l) => $l !== null));
-            $lenNew = count(array_filter($hunkNew, static fn($l) => $l !== null));
+            $lenOld = count(array_filter($hunkOld, static fn ($l) => null !== $l));
+            $lenNew = count(array_filter($hunkNew, static fn ($l) => null !== $l));
 
-            $out[] = sprintf('@@ -%d,%d +%d,%d @@', $hOld+1, max(1,$lenOld), $hNew+1, max(1,$lenNew));
+            $out[] = sprintf('@@ -%d,%d +%d,%d @@', $hOld + 1, max(1, $lenOld), $hNew + 1, max(1, $lenNew));
 
             $p = $q = 0;
             while ($p < count($hunkOld) || $q < count($hunkNew)) {
                 $lo = $p < count($hunkOld) ? $hunkOld[$p] : null;
                 $ln = $q < count($hunkNew) ? $hunkNew[$q] : null;
-                if ($lo !== null && $ln !== null && $lo === $ln) {
-                    $out[] = ' '.$lo; $p++; $q++;
-                } elseif ($lo !== null && ($ln === null || $lo !== $ln)) {
-                    $out[] = '-'.$lo; $p++;
-                } elseif ($ln !== null) {
-                    $out[] = '+'.$ln; $q++;
+                if (null !== $lo && null !== $ln && $lo === $ln) {
+                    $out[] = ' '.$lo;
+                    ++$p;
+                    ++$q;
+                } elseif (null !== $lo && (null === $ln || $lo !== $ln)) {
+                    $out[] = '-'.$lo;
+                    ++$p;
+                } elseif (null !== $ln) {
+                    $out[] = '+'.$ln;
+                    ++$q;
                 }
             }
         }
+
         return implode("\n", $out)."\n";
     }
 
@@ -438,7 +460,6 @@ PHPX);
         // Gracefully handle Ctrl-C / termination
         return \defined('SIGINT') && \defined('SIGTERM') ? [\SIGINT, \SIGTERM] : [];
     }
-
 
     public function handleSignal(int $signal, false|int $previousExitCode = 0): int|false
     {

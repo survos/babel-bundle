@@ -1,12 +1,11 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Tests\Command;
 
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\Test;
-use Survos\BabelBundle\Command\BabelScanCommand;
-use Survos\BabelBundle\Command\CarriersListCommand;
 use Survos\BabelBundle\Tests\App\Entity\TestOwner;
 use Survos\BabelBundle\Tests\KernelTestCase;
 use Survos\BabelBundle\Tests\TestCase\DbTestCaseTrait;
@@ -30,9 +29,8 @@ final class BabelCommandsTest extends KernelTestCase
         $this->createSchema($em);
     }
 
-
     #[Test]
-    public function carriers_command_lists_property_mode_entities(): void
+    public function carriersCommandListsPropertyModeEntities(): void
     {
         $cmd = $this->app->find('babel:carriers');
         $tester = new CommandTester($cmd);
@@ -44,7 +42,7 @@ final class BabelCommandsTest extends KernelTestCase
     }
 
     #[Test]
-    public function scan_command_outputs_fields_and_caches_map(): void
+    public function scanCommandOutputsFieldsAndCachesMap(): void
     {
         $cmd = $this->app->find('babel:scan');
         $tester = new CommandTester($cmd);
@@ -58,7 +56,7 @@ final class BabelCommandsTest extends KernelTestCase
     }
 
     #[Test]
-    public function translate_command_writes_missing_translations_via_fake_translator(): void
+    public function translateCommandWritesMissingTranslationsViaFakeTranslator(): void
     {
         // Persist an owner with English text
         /** @var EntityManagerInterface $em */

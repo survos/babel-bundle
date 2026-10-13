@@ -1,5 +1,7 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Survos\BabelBundle\Service;
 
 // move to survos/translator-bundle
@@ -251,14 +253,14 @@ class FakeTranslatorService
     {
         // Handle parameters first
         foreach ($parameters as $key => $value) {
-            $text = str_replace('%' . $key . '%', (string) $value, $text);
+            $text = str_replace('%'.$key.'%', (string) $value, $text);
         }
 
         // Split into words while preserving punctuation and spacing
         $tokens = preg_split('/(\s+|[.,!?;:()"\'-])/', $text, -1, PREG_SPLIT_DELIM_CAPTURE);
         $result = [];
 
-        for ($i = 0; $i < count($tokens); $i++) {
+        for ($i = 0; $i < count($tokens); ++$i) {
             $token = $tokens[$i];
             $lowerToken = strtolower(trim($token));
 
@@ -269,7 +271,7 @@ class FakeTranslatorService
             }
 
             // Handle "the" specially - need to look ahead for gender
-            if ($lowerToken === 'the') {
+            if ('the' === $lowerToken) {
                 $nextWord = $this->getNextWord($tokens, $i);
                 $result[] = $this->getSpanishArticle($nextWord);
                 continue;
@@ -291,12 +293,13 @@ class FakeTranslatorService
 
     private function getNextWord(array $tokens, int $currentIndex): string
     {
-        for ($i = $currentIndex + 1; $i < count($tokens); $i++) {
+        for ($i = $currentIndex + 1; $i < count($tokens); ++$i) {
             $token = trim($tokens[$i]);
             if (!empty($token) && !preg_match('/^\s*$/', $token) && !preg_match('/^[.,!?;:()"\'-]+$/', $token)) {
                 return strtolower($token);
             }
         }
+
         return '';
     }
 
@@ -312,9 +315,10 @@ class FakeTranslatorService
             $singular = preg_replace('/s$/', '', $nextWord);
             foreach ($this->feminineMasculinePatterns as $pattern => $article) {
                 if (preg_match($pattern, $singular)) {
-                    return $article === 'la' ? 'las' : 'los';
+                    return 'la' === $article ? 'las' : 'los';
                 }
             }
+
             return 'los'; // Default plural masculine
         }
 
@@ -338,37 +342,37 @@ class FakeTranslatorService
             // Convert "-ing" to "-ando" or "-iendo"
             $base = preg_replace('/ing$/', '', $lowerWord);
             if (preg_match('/[aeiou]$/', $base)) {
-                $result = $base . 'ndo';
+                $result = $base.'ndo';
             } else {
-                $result = $base . 'ando';
+                $result = $base.'ando';
             }
         } elseif (preg_match('/ed$/', $lowerWord)) {
             // Convert "-ed" to "-ado" or "-ido"
             $base = preg_replace('/ed$/', '', $lowerWord);
-            $result = $base . 'ado';
+            $result = $base.'ado';
         } elseif (preg_match('/er$/', $lowerWord)) {
             // Convert "-er" to "-ero" (like worker -> trabajero)
-            $result = $lowerWord . 'o';
+            $result = $lowerWord.'o';
         } elseif (preg_match('/ly$/', $lowerWord)) {
             // Convert "-ly" to "-mente"
             $base = preg_replace('/ly$/', '', $lowerWord);
-            $result = $base . 'mente';
+            $result = $base.'mente';
         } elseif (preg_match('/tion$/', $lowerWord)) {
             // Convert "-tion" to "-ción"
             $base = preg_replace('/tion$/', '', $lowerWord);
-            $result = $base . 'ción';
+            $result = $base.'ción';
         } elseif (preg_match('/sion$/', $lowerWord)) {
             // Convert "-sion" to "-sión"
             $base = preg_replace('/sion$/', '', $lowerWord);
-            $result = $base . 'sión';
+            $result = $base.'sión';
         } else {
             // For nouns, add Spanish-like endings
             if (preg_match('/[bcdfghjklmnpqrstvwxyz]$/', $lowerWord)) {
                 // Consonant ending - make it masculine or add vowel
                 if (strlen($lowerWord) > 4 && rand(0, 1)) {
-                    $result = $lowerWord . 'o';
+                    $result = $lowerWord.'o';
                 } else {
-                    $result = $lowerWord . 'a';
+                    $result = $lowerWord.'a';
                 }
             } elseif (preg_match('/e$/', $lowerWord)) {
                 // Replace 'e' with 'a' or 'o'
@@ -397,15 +401,15 @@ class FakeTranslatorService
         $accented = ['á', 'é', 'í', 'ó', 'ú'];
 
         // Replace a random vowel with an accented version
-        for ($i = 0; $i < count($vowels); $i++) {
-            if (strpos($word, $vowels[$i]) !== false && rand(1, 3) === 1) {
-                $word = preg_replace('/' . $vowels[$i] . '/', $accented[$i], $word, 1);
+        for ($i = 0; $i < count($vowels); ++$i) {
+            if (false !== strpos($word, $vowels[$i]) && 1 === rand(1, 3)) {
+                $word = preg_replace('/'.$vowels[$i].'/', $accented[$i], $word, 1);
                 break;
             }
         }
 
         // Sometimes add ñ if there's an 'n'
-        if (strpos($word, 'n') !== false && rand(1, 8) === 1) {
+        if (false !== strpos($word, 'n') && 1 === rand(1, 8)) {
             $word = preg_replace('/n/', 'ñ', $word, 1);
         }
 
@@ -418,9 +422,9 @@ class FakeTranslatorService
             return strtoupper($newWord);
         } elseif (ctype_upper($originalWord[0] ?? '')) {
             return ucfirst(strtolower($newWord));
-        } else {
-            return strtolower($newWord);
         }
+
+        return strtolower($newWord);
     }
 
     public function getCatalogue(?string $locale = null): \Symfony\Component\Translation\MessageCatalogueInterface

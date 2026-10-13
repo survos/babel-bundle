@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service\Engine;
@@ -9,7 +10,9 @@ namespace Survos\BabelBundle\Service\Engine;
  */
 final class PropertyStorage implements StringStorage
 {
-    public function __construct() {}
+    public function __construct()
+    {
+    }
 
     public function populate(object $carrier, ?string $emName = null): int
     {

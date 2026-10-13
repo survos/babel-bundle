@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\EventListener;
@@ -40,12 +41,12 @@ final class BabelHashPointerPostLoadHydrator
         }
 
         $fieldToHash = $entity->getStrHashMap();
-        if ($fieldToHash === []) {
+        if ([] === $fieldToHash) {
             return;
         }
 
         $displayLocale = HashUtil::normalizeLocale($this->locale->get());
-        if ($displayLocale === '') {
+        if ('' === $displayLocale) {
             return;
         }
 
@@ -53,12 +54,12 @@ final class BabelHashPointerPostLoadHydrator
         $norm = [];
         foreach ($fieldToHash as $field => $hash) {
             $field = (string) $field;
-            $hash  = (string) $hash;
-            if ($field !== '' && $hash !== '') {
+            $hash = (string) $hash;
+            if ('' !== $field && '' !== $hash) {
                 $norm[$field] = $hash;
             }
         }
-        if ($norm === []) {
+        if ([] === $norm) {
             return;
         }
 
@@ -77,7 +78,7 @@ final class BabelHashPointerPostLoadHydrator
         foreach ($rows as $r) {
             $h = (string) ($r['str_hash'] ?? '');
             $t = $r['text'] ?? null;
-            if ($h !== '') {
+            if ('' !== $h) {
                 $byHash[$h] = \is_string($t) ? $t : null;
             }
         }
@@ -85,14 +86,14 @@ final class BabelHashPointerPostLoadHydrator
         $miss = 0;
         foreach ($norm as $field => $hash) {
             if (!array_key_exists($hash, $byHash)) {
-                $miss++;
+                ++$miss;
                 // leave null so caller falls back to backing/raw
                 $entity->setResolvedTranslation($field, null);
                 continue;
             }
 
             $text = $byHash[$hash];
-            $entity->setResolvedTranslation($field, ($text !== null && $text !== '') ? $text : null);
+            $entity->setResolvedTranslation($field, (null !== $text && '' !== $text) ? $text : null);
         }
 
         if ($this->debug && $miss > 0) {

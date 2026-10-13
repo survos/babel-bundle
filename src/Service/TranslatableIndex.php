@@ -1,4 +1,5 @@
 <?php
+
 declare(strict_types=1);
 
 namespace Survos\BabelBundle\Service;
@@ -76,7 +77,7 @@ final class TranslatableIndex
             return [];
         }
 
-        /** @var array<string, array{set:string,multiple:bool,context:?string}> $terms */
+        /* @var array<string, array{set:string,multiple:bool,context:?string}> $terms */
         return $terms;
     }
 
@@ -115,7 +116,7 @@ final class TranslatableIndex
         $cfg = $this->map[$class] ?? null;
         $val = $cfg['targetLocales'] ?? null;
 
-        if ($val === null) {
+        if (null === $val) {
             return null;
         }
 
@@ -138,13 +139,14 @@ final class TranslatableIndex
      * - If null, we return the fallback list.
      *
      * @param array<string> $fallbackLocales
+     *
      * @return array<string>
      */
     public function effectiveTargetLocalesFor(string $class, array $fallbackLocales): array
     {
         $targets = $this->targetLocalesFor($class);
 
-        if ($targets === null) {
+        if (null === $targets) {
             return $fallbackLocales;
         }
 
