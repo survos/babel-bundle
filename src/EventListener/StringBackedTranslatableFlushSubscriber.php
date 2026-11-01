@@ -225,7 +225,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
                           meta         = EXCLUDED.meta";
         }
 
-        if ($pf instanceof SQLitePlatform) {
+        if ($pf instanceof SQLitePlatform || $pf instanceof \DuckDb\DBAL\Platforms\DuckDBPlatform) {
             return "INSERT INTO {$strTable} (code, source_locale, source, context, meta)
                     VALUES (:code, :source_locale, :source, :context, :meta)
                     ON CONFLICT(code) DO UPDATE SET
@@ -256,7 +256,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
                     ON CONFLICT (str_code, target_locale, engine) DO NOTHING";
         }
 
-        if ($pf instanceof SQLitePlatform) {
+        if ($pf instanceof SQLitePlatform || $pf instanceof \DuckDb\DBAL\Platforms\DuckDBPlatform) {
             return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
                     VALUES (:str_code, :target_locale, :engine, NULL, :meta)
                     ON CONFLICT(str_code, target_locale, engine) DO NOTHING";
@@ -277,7 +277,7 @@ final class StringBackedTranslatableFlushSubscriber implements EventSubscriber, 
                           meta = EXCLUDED.meta";
         }
 
-        if ($pf instanceof SQLitePlatform) {
+        if ($pf instanceof SQLitePlatform || $pf instanceof \DuckDb\DBAL\Platforms\DuckDBPlatform) {
             return "INSERT INTO {$trTable} (str_code, target_locale, engine, text, meta)
                     VALUES (:str_code, :target_locale, :engine, :text, :meta)
                     ON CONFLICT(str_code, target_locale, engine) DO UPDATE SET

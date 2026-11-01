@@ -101,8 +101,9 @@ final class BabelPostLoadHydrator
                     foreach ($rows as $r) {
                         $k = (string) ($r['str_code'] ?? '');
                         $t = $r['text'] ?? null;
-                        if ('' !== $k) {
-                            $byStrCode[$k] = \is_string($t) ? $t : null;
+                        // Blank provider stubs must not hide an existing supplied translation.
+                        if ('' !== $k && \is_string($t) && '' !== $t) {
+                            $byStrCode[$k] = $t;
                         }
                     }
 
