@@ -187,3 +187,29 @@ Babel is intentionally:
 - powerful at scale
 
 Once wired correctly, it disappears into the background.
+
+## Locale-aware Doctrine Instant Search
+
+When both Babel and SearchBundle's `searchFieldPredicate` hook are installed,
+Babel automatically supplies matching predicates for string-backed translatable
+fields in Doctrine searches. Configure either `o.label` or `o.labelBacking` in
+`DoctrineAdapter::SEARCH_FIELDS`; Babel uses its compiled `TranslatableIndex`.
+No application-specific joins or translation generation are needed.
+
+Matching follows the display locale: nonblank target translations are searched;
+source text is searched when that locale is the source language or when the
+translation is missing. Empty provider stubs never hide populated translations.
+If multiple providers have nonblank text, the highest translation row ID wins
+consistently in both hydration and search. Ordinary identifiers remain searchable.
+
+The integration uses DQL source-set subqueries, so translation rows cannot multiply
+hits, totals or facet counts. The same predicate runs before pagination and facet
+self-exclusion. Source-language matching skips translation tables. Semantic search
+continues to use its vector candidates, without applying literal keyword matching.
+SQLite and DuckDB are covered by the same ORM regression tests.
+
+The searched entity manager must map Babel's `Str` and `StrTranslation` entities.
+Source locales can be fixed in Babel metadata, use the application default, or
+come from a mapped property containing normalized locale codes. A computed method
+accessor needs an explicit searchable locale property. Other search adapters and
+installations without a compatible SearchBundle remain unchanged.

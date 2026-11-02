@@ -36,6 +36,7 @@ return static function (ContainerConfigurator $c): void {
     $s->load('Survos\\BabelBundle\\', \dirname(__DIR__).'/src/')
         ->exclude([
             \dirname(__DIR__).'/src/Entity/',
+            \dirname(__DIR__).'/src/Search/', // Optional SearchBundle bridge is registered conditionally.
             \dirname(__DIR__).'/src/Traits/',
             \dirname(__DIR__).'/src/Resources/',
             \dirname(__DIR__).'/src/Tests/',

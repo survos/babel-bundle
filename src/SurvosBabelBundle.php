@@ -44,6 +44,11 @@ final class SurvosBabelBundle extends AbstractBundle
     {
         $container->import(\dirname(__DIR__).'/config/services.php');
 
+        if (class_exists(\Survos\SearchBundle\Event\PreSearchEvent::class) && defined(\Survos\SearchBundle\Adapter\Doctrine\DoctrineAdapter::class.'::SEARCH_FIELD_PREDICATE')) {
+            $builder->register(Search\TranslatedFieldPredicate::class)->setAutowired(true)->setAutoconfigured(true);
+            $builder->register(Search\BabelSearchSubscriber::class)->setAutowired(true)->setAutoconfigured(true);
+        }
+
         if (!$builder->hasParameter('survos_babel.scan_namespaces')) {
             $builder->setParameter('survos_babel.scan_namespaces', [
                 'App\\Entity\\',

@@ -77,18 +77,19 @@ final class BabelPostLoadHydrator
                 if ([] !== $fieldToStrCode) {
                     // No engine filter: `engine` records real provenance (libre/deepl/...),
                     // not a "this is the canonical row" marker — the old 'babel' constant
-                    // conflated the two. One StrTranslation row per (str_code, target_locale)
-                    // is the current invariant, so whichever row is there is the one to show.
+                    // conflated the two. Read in id order so the newest nonblank provider row
+                    // wins deterministically, matching the shared search predicate.
                     $sql = sprintf(
                         'SELECT tr.%s AS str_code, tr.%s AS text
                          FROM %s tr
                          WHERE tr.%s IN (?)
-                           AND tr.%s = ?',
+                           AND tr.%s = ? ORDER BY tr.%s ASC',
                         BabelSchema::STR_TR_STR_CODE,
                         BabelSchema::STR_TR_TEXT,
                         BabelSchema::STR_TR_TABLE,
                         BabelSchema::STR_TR_STR_CODE,
-                        BabelSchema::STR_TR_TARGET_LOCALE
+                        BabelSchema::STR_TR_TARGET_LOCALE,
+                        BabelSchema::STR_TR_ID
                     );
 
                     $rows = $conn->executeQuery(
