@@ -149,7 +149,7 @@ final class TranslateCommand
                 ->andWhere('t.targetLocale = :loc')->setParameter('loc', $targetLocale)
                 ->andWhere('(t.text IS NULL OR t.text = \'\')')
                 ->andWhere('t.status = :status')->setParameter('status', StrTranslationBase::STATUS_NEW)
-                ->orderBy('t.strCode', 'ASC');
+                ->orderBy('t.strCode');
 
             if ($limit > 0) {
                 $qb->setMaxResults($limit);
