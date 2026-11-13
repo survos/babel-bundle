@@ -33,7 +33,6 @@ final class SurvosBabelBundle extends AbstractBundle
                         'type' => 'attribute',
                         'dir' => \dirname(__DIR__).'/src/Entity',
                         'prefix' => 'Survos\\BabelBundle\\Entity',
-                        'alias' => 'Babel',
                     ],
                 ],
             ],
